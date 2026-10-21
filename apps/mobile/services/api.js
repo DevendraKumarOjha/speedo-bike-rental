@@ -1,6 +1,7 @@
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const expoHostUri = Constants.expoConfig?.hostUri;
 const expoHost = expoHostUri
@@ -27,6 +28,16 @@ const apiBaseURL =
 const api = axios.create({
   baseURL: apiBaseURL,
   timeout: 15000,
+});
+
+api.interceptors.request.use(async (config) => {
+  const token = await AsyncStorage.getItem('authToken');
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  return config;
 });
 
 export default api;

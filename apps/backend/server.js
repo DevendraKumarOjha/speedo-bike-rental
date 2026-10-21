@@ -3,9 +3,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
+const jwt = require('jsonwebtoken');
 
 const otpStore = require('./otpStore');
 const dataStore = require('./dataStore');
+const profileStore = require('./mysqlProfileStore');
 
 const app = express();
 
@@ -22,8 +24,11 @@ const OTP_MODE =
 const bikes = dataStore.state.bikes;
 const bookings = dataStore.state.bookings;
 const payments = dataStore.state.payments;
-const users = dataStore.state.users;
 const wallets = dataStore.state.wallets;
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  process.env.SESSION_SECRET ||
+  'bike-rental-local-secret';
 
 const getAdminWallet = (mobile) => {
   if (!wallets.admins[mobile]) {
@@ -305,7 +310,7 @@ app.post('/api/auth/send-otp', (req, res) => {
 
 
 // VERIFY OTP
-app.post('/api/auth/verify-otp', (req, res) => {
+app.post('/api/auth/verify-otp', async (req, res) => {
   try {
 
     const mobile =
@@ -335,38 +340,33 @@ app.post('/api/auth/verify-otp', (req, res) => {
       });
     }
 
-    let user = users.find(
-      (u) => u.mobile === mobile
+    const user = await profileStore.findOrCreateUser(
+      mobile,
+      getUserRole(mobile)
     );
 
-   if (!user) {
-
-  user = {
-    id: Date.now(),
-    mobile,
-    role: getUserRole(mobile),
-  };
-
-  users.push(user);
-  saveData();
-}
-console.log(
-  'USER LOGIN:',
-  user
-);
-
     req.session.user = user;
+    const token = jwt.sign(
+      {
+        mobile: user.mobile,
+        role: user.role,
+      },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
 
     delete otpStore[mobile];
 
     res.json({
       message: 'Login successful',
       user,
+      token,
     });
 
   } catch (error) {
+    console.error('OTP verification failed:', error);
     res.status(500).json({
-      message: error.message,
+      message: 'Unable to complete login right now',
     });
   }
 });
@@ -1252,23 +1252,114 @@ app.post('/api/bookings/:id/complete', (req, res) => {
     bike,
   });
 });
-// PROTECTED ROUTE
-app.get('/api/profile', (req, res) => {
+const requireAuthentication = (req, res, next) => {
+  const authorization =
+    String(req.headers.authorization || '');
+  const [scheme, token] = authorization.split(' ');
 
-  if (!req.session.user) {
+  if (scheme !== 'Bearer' || !token) {
     return res.status(401).json({
       message: 'Unauthorized',
     });
   }
 
-  res.json({
-    user: req.session.user,
-  });
+  try {
+    req.authUser = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      message: 'Session expired. Please log in again.',
+    });
+  }
+};
+
+app.get('/api/profile', requireAuthentication, async (req, res) => {
+  try {
+    const user = await profileStore.findUser(req.authUser.mobile);
+
+    if (!user) {
+      return res.status(404).json({
+        message: 'User profile not found',
+      });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error('Unable to load user profile:', error);
+    res.status(500).json({
+      message: 'Unable to load user profile right now',
+    });
+  }
 });
 
+app.put('/api/profile', requireAuthentication, async (req, res) => {
+  const fullName = String(req.body.fullName || '').trim();
+  const email = String(req.body.email || '').trim();
+  const city = String(req.body.city || '').trim();
+  const address = String(req.body.address || '').trim();
+
+  if (!fullName || fullName.length > 100) {
+    return res.status(400).json({
+      message: 'Full name is required and must be 100 characters or fewer',
+    });
+  }
+
+  if (
+    email.length > 254 ||
+    (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+  ) {
+    return res.status(400).json({
+      message: 'Please enter a valid email address',
+    });
+  }
+
+  if (city.length > 100 || address.length > 255) {
+    return res.status(400).json({
+      message: 'City or address is too long',
+    });
+  }
+
+  try {
+    const user = await profileStore.updateProfile(
+      req.authUser.mobile,
+      {
+        fullName,
+        email: email || null,
+        city: city || null,
+        address: address || null,
+      }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        message: 'User profile not found',
+      });
+    }
+
+    res.json({
+      message: 'Profile updated successfully',
+      user,
+    });
+  } catch (error) {
+    console.error('Unable to update user profile:', error);
+    res.status(500).json({
+      message: 'Unable to update user profile right now',
+    });
+  }
+});
 
 const port = process.env.PORT || 3002;
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Server running on port ${port} (all network interfaces)`);
-});
+const startServer = async () => {
+  try {
+    await profileStore.initialize();
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`Server running on port ${port} (all network interfaces)`);
+    });
+  } catch (error) {
+    console.error('Unable to initialize MySQL profile storage:', error);
+    process.exitCode = 1;
+  }
+};
+
+startServer();

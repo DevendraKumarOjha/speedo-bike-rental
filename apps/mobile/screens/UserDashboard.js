@@ -18,8 +18,10 @@ import {
 import api from '../services/api';
 
 export default function UserDashboard({
+  user,
   onBrowseBikes,
   onBookings,
+  onProfile,
   onLogout,
 }) {
 
@@ -76,12 +78,13 @@ export default function UserDashboard({
           marginBottom: 18,
         }}
       >
-        <View>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <View
             style={{
               flexDirection: 'row',
               alignItems: 'center',
               gap: 6,
+              minWidth: 0,
             }}
           >
             <Feather
@@ -94,7 +97,10 @@ export default function UserDashboard({
               color: '#111111',
               fontSize: 13,
               fontWeight: '700',
+              flexShrink: 1,
             }}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
             Jaipur, Rajasthan
           </Text>
@@ -103,30 +109,45 @@ export default function UserDashboard({
             style={{
               color: '#777777',
               marginTop: 4,
+              flexShrink: 1,
             }}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
-            Find your next ride
+            {user?.fullName
+              ? `Welcome, ${user.fullName}`
+              : 'Find your next ride'}
           </Text>
         </View>
 
-        <TouchableOpacity
-          onPress={onLogout}
-          style={{
-            backgroundColor: '#111111',
-            borderRadius: 12,
-            paddingVertical: 10,
-            paddingHorizontal: 14,
-          }}
-        >
-          <Text
+        <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
+          <TouchableOpacity
+            onPress={onProfile}
             style={{
-              color: '#FFFFFF',
-              fontWeight: '800',
+              backgroundColor: '#F5C400',
+              borderRadius: 12,
+              paddingVertical: 10,
+              paddingHorizontal: 14,
             }}
           >
-            Logout
-          </Text>
-        </TouchableOpacity>
+            <Text style={{ color: '#111111', fontWeight: '800' }}>
+              Profile
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onLogout}
+            style={{
+              backgroundColor: '#111111',
+              borderRadius: 12,
+              paddingVertical: 10,
+              paddingHorizontal: 14,
+            }}
+          >
+            <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>
+              Logout
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View
@@ -394,7 +415,7 @@ export default function UserDashboard({
         </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={onLogout}
+          onPress={onProfile}
           style={{
             alignItems: 'center',
             flex: 1,
@@ -413,7 +434,7 @@ export default function UserDashboard({
               marginTop: 3,
             }}
           >
-            Logout
+            Profile
           </Text>
         </TouchableOpacity>
       </View>

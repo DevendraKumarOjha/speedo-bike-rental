@@ -27,6 +27,18 @@ npm start
 ```
 
 The API listens on port `3002` on all network interfaces. Local OTP mode is enabled (`OTP_MODE=mock`).
+On first start, the backend creates the MySQL database `speedo-bike-rental` and its `users` profile table. Configure MySQL in `apps/backend/.env` before starting the backend:
+
+```env
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your-local-mysql-password
+MYSQL_DATABASE=speedo-bike-rental
+JWT_SECRET=use-a-long-random-secret
+```
+
+Replace the sample password and JWT secret in your ignored local `.env`; do not commit those values. The MySQL account needs permission to create the database and tables. User profiles (full name, email, mobile, city, and address) are stored in MySQL; the existing bikes, bookings, payments, and wallets continue using the local JSON store.
 
 ## 3. Start the React Native app
 
@@ -54,6 +66,7 @@ Replace `192.168.1.10` with your computer's LAN IP. Make sure the phone and comp
 ## Main mobile features
 
 - OTP login and saved login session
+- MySQL-backed user profiles (full name, email, mobile, city, and address)
 - User, Admin and Super Admin role-based screens
 - Browse/filter available bikes
 - Bike registration and admin bike management

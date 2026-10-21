@@ -24,6 +24,7 @@ import SuperAdminDashboard from './screens/SuperAdminDashboard';
 import BookingConfirmedScreen from './screens/BookingConfirmedScreen';
 import UserBookingsScreen from './screens/UserBookingsScreen';
 import MockPaymentScreen from './screens/MockPaymentScreen';
+import UserProfileScreen from './screens/UserProfileScreen';
 
 import {
   SafeAreaView,
@@ -95,6 +96,7 @@ export default function App() {
 
   const handleLogout = async () => {
     await AsyncStorage.removeItem('user');
+    await AsyncStorage.removeItem('authToken');
     resetLoginState();
     setScreen('LOGIN');
   };
@@ -161,6 +163,19 @@ if (screen === 'USER_BOOKINGS') {
     />
   );
 }
+
+if (screen === 'USER_PROFILE') {
+  return (
+    <UserProfileScreen
+      user={currentUser}
+      onBack={() => setScreen('USER')}
+      onSave={async (user) => {
+        setCurrentUser(user);
+        await AsyncStorage.setItem('user', JSON.stringify(user));
+      }}
+    />
+  );
+}
  
 if (screen === 'MY_BIKES') {
   return (
@@ -213,6 +228,7 @@ if (screen === 'ADD_BIKE') {
 if (screen === 'USER') {
   return (
     <UserDashboard
+      user={currentUser}
       onBrowseBikes={() =>
         setScreen(
           'AVAILABLE_BIKES'
@@ -223,6 +239,7 @@ if (screen === 'USER') {
           'USER_BOOKINGS'
         )
       }
+      onProfile={() => setScreen('USER_PROFILE')}
       onLogout={() =>
         handleLogout()
       }
@@ -331,6 +348,10 @@ if (screen === 'AVAILABLE_BIKES') {
       );
 
       const user = response.data.user;
+      await AsyncStorage.setItem(
+        'authToken',
+        response.data.token
+      );
       setUserRole(user.role);
       setCurrentUser(user);
 
