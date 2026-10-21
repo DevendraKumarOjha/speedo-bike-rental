@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 
 const OTP_MODE = process.env.OTP_MODE || 'mock';
+const DEFAULT_MSG91_API_BASE_URL = 'https://control.msg91.com/api/v5';
 const MOCK_OTP_TTL_MS = 5 * 60 * 1000;
 const mockOtps = new Map();
 
@@ -28,13 +29,34 @@ const getMsg91Config = () => {
 
 const getMsg91OtpUrl = (path, params) => {
   const { authKey } = getMsg91Config();
+  const configuredBaseUrl =
+    process.env.MSG91_API_BASE_URL || DEFAULT_MSG91_API_BASE_URL;
+  let baseUrl;
+
+  try {
+    baseUrl = new URL(configuredBaseUrl);
+  } catch {
+    throw new Error('MSG91_API_BASE_URL must be a valid HTTPS URL');
+  }
+
+  if (
+    baseUrl.protocol !== 'https:' ||
+    baseUrl.username ||
+    baseUrl.password ||
+    baseUrl.search ||
+    baseUrl.hash
+  ) {
+    throw new Error('MSG91_API_BASE_URL must be a valid HTTPS base URL');
+  }
+
   const endpoint = path ? `/otp/${path}` : '/otp';
   const query = new URLSearchParams({
     ...params,
     authkey: authKey,
   });
 
-  return `https://control.msg91.com/api/v5${endpoint}?${query}`;
+  const apiBaseUrl = `${baseUrl.origin}${baseUrl.pathname.replace(/\/+$/, '')}`;
+  return `${apiBaseUrl}${endpoint}?${query}`;
 };
 
 const readProviderResponse = async (response) => {

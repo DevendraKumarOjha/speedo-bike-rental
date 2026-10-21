@@ -37,9 +37,11 @@ OTP_MODE=msg91
 MSG91_AUTH_KEY=your-msg91-auth-key
 MSG91_TEMPLATE_ID=your-approved-otp-template-id
 MSG91_COUNTRY_CODE=91
+# Optional; defaults to https://control.msg91.com/api/v5
+# MSG91_API_BASE_URL=https://control.msg91.com/api/v5
 ```
 
-Create an OTP template in MSG91 containing its required OTP variable, and complete any required sender, DLT, and Indian messaging approvals. This integration calls MSG91's production API (`control.msg91.com`), so use a production auth key and a template from the same production account; a key from the MSG91 test portal may not send real SMS. The backend calls MSG91's OTP send and verify APIs; it does not return an OTP in MSG91 mode. A successful API response means MSG91 accepted the request, not that the handset received it. Check MSG91 Transaction Logs/OTP Analytics for delivery status. Restart the backend after changing its environment. Never put the MSG91 auth key in the mobile app or commit it to source control.
+Create an OTP template in MSG91 containing its required OTP variable, and complete any required sender, DLT, and Indian messaging approvals. By default, this integration calls MSG91's production API (`control.msg91.com`). A test-portal login does not switch the backend to a test API: the test portal logs will be empty for requests sent to production. To use a sandbox, obtain its supported OTP API base URL, auth key, and template from MSG91, then set `MSG91_API_BASE_URL` and use credentials for that same environment. Do not use the test portal's website URL as the API base unless MSG91 explicitly documents it as one. The backend calls MSG91's OTP send and verify APIs; it does not return an OTP in MSG91 mode. A successful API response means MSG91 accepted the request, not that the handset received it. Check the matching environment's OTP logs for delivery status. Restart the backend after changing its environment. Never put the MSG91 auth key in the mobile app or commit it to source control.
 
 ## 3. Start the React Native app
 
