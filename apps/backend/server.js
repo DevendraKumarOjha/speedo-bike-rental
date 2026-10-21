@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
 
-const otpStore = require('./otpStore');
+const otpProvider = require('./otpProvider');
 const dataStore = require('./dataStore');
 
 const app = express();
@@ -15,9 +15,7 @@ const SUPER_ADMIN_COMMISSION_RATE = 0.10;
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
 const OTP_MODE =
   process.env.OTP_MODE ||
-  (process.env.NODE_ENV === 'production'
-    ? 'sms'
-    : 'mock');
+  'mock';
 
 const bikes = dataStore.state.bikes;
 const bookings = dataStore.state.bookings;
@@ -253,7 +251,7 @@ app.get('/api/test', (req, res) => {
 });
 
 // SEND OTP
-app.post('/api/auth/send-otp', (req, res) => {
+app.post('/api/auth/send-otp', async (req, res) => {
   try {
     const mobile =
       String(req.body.mobile || '').trim();
@@ -271,25 +269,18 @@ app.post('/api/auth/send-otp', (req, res) => {
       });
     }
 
-    // Generate 6 digit OTP
-    const otp =
-      Math.floor(
-        100000 + Math.random() * 900000
-      ).toString();
-
-    otpStore[mobile] = otp;
-
-    console.log(
-      `OTP for ${mobile}: ${otp}`
-    );
+    const otpResult = await otpProvider.sendOtp(mobile);
 
     const response = {
-      message: 'OTP sent successfully',
+      message:
+        OTP_MODE === 'msg91'
+          ? 'MSG91 accepted the OTP request. SMS delivery may take a short time.'
+          : 'OTP sent successfully',
       otpMode: OTP_MODE,
     };
 
     if (OTP_MODE === 'mock') {
-      response.otp = otp;
+      response.otp = otpResult.otp;
       response.message =
         'Mock OTP generated successfully';
     }
@@ -297,15 +288,19 @@ app.post('/api/auth/send-otp', (req, res) => {
     res.json(response);
 
   } catch (error) {
+    console.error('Unable to send OTP:', error.message);
     res.status(500).json({
-      message: error.message,
+      message:
+        OTP_MODE === 'msg91'
+          ? 'Unable to send OTP right now. Please try again.'
+          : 'OTP service is not configured correctly.',
     });
   }
 });
 
 
 // VERIFY OTP
-app.post('/api/auth/verify-otp', (req, res) => {
+app.post('/api/auth/verify-otp', async (req, res) => {
   try {
 
     const mobile =
@@ -320,18 +315,11 @@ app.post('/api/auth/verify-otp', (req, res) => {
       });
     }
 
-    const storedOtp =
-      otpStore[mobile];
+    const isValidOtp = await otpProvider.verifyOtp(mobile, otp);
 
-    if (!storedOtp) {
+    if (!isValidOtp) {
       return res.status(400).json({
-        message: 'OTP expired',
-      });
-    }
-
-    if (storedOtp !== otp) {
-      return res.status(400).json({
-        message: 'Invalid OTP',
+        message: 'Invalid or expired OTP',
       });
     }
 
@@ -357,16 +345,18 @@ console.log(
 
     req.session.user = user;
 
-    delete otpStore[mobile];
-
     res.json({
       message: 'Login successful',
       user,
     });
 
   } catch (error) {
+    console.error('OTP verification failed:', error.message);
     res.status(500).json({
-      message: error.message,
+      message:
+        OTP_MODE === 'msg91'
+          ? 'Unable to verify OTP right now. Please try again.'
+          : 'OTP verification is unavailable right now.',
     });
   }
 });

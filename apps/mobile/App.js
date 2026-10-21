@@ -283,7 +283,8 @@ if (screen === 'AVAILABLE_BIKES') {
         'OTP Sent',
         response.data.otp
           ? `Local mock OTP: ${response.data.otp}`
-          : 'Please check your SMS for the OTP'
+          : response.data.message ||
+            'OTP request accepted. If no SMS arrives, check MSG91 delivery logs.'
       );
 
       setStep(2);

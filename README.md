@@ -26,7 +26,20 @@ npm install
 npm start
 ```
 
-The API listens on port `3002` on all network interfaces. Local OTP mode is enabled (`OTP_MODE=mock`).
+The API listens on port `3002` on all network interfaces. Local mock OTP mode is enabled by default (`OTP_MODE=mock`).
+
+### Enable MSG91 OTP delivery
+
+Keep `OTP_MODE=mock` while developing and testing locally. When your MSG91 account and OTP template are ready, set these values in your ignored `apps/backend/.env`:
+
+```env
+OTP_MODE=msg91
+MSG91_AUTH_KEY=your-msg91-auth-key
+MSG91_TEMPLATE_ID=your-approved-otp-template-id
+MSG91_COUNTRY_CODE=91
+```
+
+Create an OTP template in MSG91 containing its required OTP variable, and complete any required sender, DLT, and Indian messaging approvals. This integration calls MSG91's production API (`control.msg91.com`), so use a production auth key and a template from the same production account; a key from the MSG91 test portal may not send real SMS. The backend calls MSG91's OTP send and verify APIs; it does not return an OTP in MSG91 mode. A successful API response means MSG91 accepted the request, not that the handset received it. Check MSG91 Transaction Logs/OTP Analytics for delivery status. Restart the backend after changing its environment. Never put the MSG91 auth key in the mobile app or commit it to source control.
 
 ## 3. Start the React Native app
 
@@ -63,7 +76,7 @@ Replace `192.168.1.10` with your computer's LAN IP. Make sure the phone and comp
 ## Important notes
 
 - Payment is a mock/demo flow; do not use it to collect real payments.
-- Backend OTP mode defaults to mock for local development. Configure a real SMS provider before production.
+- Backend OTP mode defaults to mock for local development. Select `OTP_MODE=msg91` and configure MSG91 before enabling real SMS delivery.
 - `apps/backend/data/app-data.json` stores local demo data. Back it up before resetting or replacing it.
 - The original backend `.env` file is intentionally not included because environment files can contain private credentials. Use `.env.example` as a starting point.
 - This is an Expo React Native project (native Android/iOS UI), not a WebView wrapper.
