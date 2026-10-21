@@ -1,0 +1,11 @@
+{
+  "name": "bike-rental-react-native",
+  "private": true,
+  "scripts": {
+    "mobile": "npm --prefix apps/mobile start",
+    "android": "npm --prefix apps/mobile run android",
+    "ios": "npm --prefix apps/mobile run ios",
+    "backend": "npm --prefix apps/backend start",
+    "install:all": "npm --prefix apps/mobile install && npm --prefix apps/backend install"
+  }
+}
