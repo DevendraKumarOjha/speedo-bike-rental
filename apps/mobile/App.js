@@ -20,7 +20,6 @@ import AddBikeScreen from './screens/AddBikeScreen';
 import MyBikesScreen from './screens/MyBikesScreen';
 import AvailableBikesScreen from './screens/AvailableBikesScreen';
 import AdminEarningsScreen from './screens/AdminEarningsScreen';
-import SuperAdminDashboard from './screens/SuperAdminDashboard';
 import BookingConfirmedScreen from './screens/BookingConfirmedScreen';
 import UserBookingsScreen from './screens/UserBookingsScreen';
 import MockPaymentScreen from './screens/MockPaymentScreen';
@@ -35,21 +34,21 @@ import getFriendlyErrorMessage from './utils/getFriendlyErrorMessage';
 export default function App() {
   //Screen State
   const [mobile, setMobile] = useState('');
-  const [otp, setOtp] = useState('');
-  const [step, setStep] = useState(1);
+  const [password, setPassword] = useState('');
+  const [registrationPassword, setRegistrationPassword] = useState('');
+  const [registrationPasswordConfirmation, setRegistrationPasswordConfirmation] = useState('');
+  const [registrationRole, setRegistrationRole] = useState('USER');
+  const [authMode, setAuthMode] = useState('password');
   const [loading, setLoading] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [screen, setScreen] = useState('LOGIN');
-  const [userRole, setUserRole] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [latestBooking, setLatestBooking] = useState(null);
   const [selectedBike, setSelectedBike] = useState(null);
   const indianMobileRegex = /^[6-9]\d{9}$/;
 
   const routeUser = (user) => {
-    if (user.role === 'SUPER_ADMIN') {
-      setScreen('SUPER_ADMIN');
-    } else if (user.role === 'ADMIN') {
+    if (user.role === 'ADMIN') {
       setScreen('ADMIN');
     } else {
       setScreen('USER');
@@ -66,15 +65,27 @@ export default function App() {
           return;
         }
 
-        const user =
+        const savedSession =
           JSON.parse(savedUser);
 
+        if (!savedSession.token || !savedSession.user) {
+          await AsyncStorage.removeItem('user');
+          return;
+        }
+
+        const { user, token } = savedSession;
+        if (user.role === 'SUPER_ADMIN') {
+          await AsyncStorage.removeItem('user');
+          return;
+        }
+
+        api.defaults.headers.common.Authorization = `Bearer ${token}`;
         setCurrentUser(user);
-        setUserRole(user.role);
         setIsLoggedIn(true);
         routeUser(user);
-      } catch (error) {
+      } catch {
         await AsyncStorage.removeItem('user');
+        delete api.defaults.headers.common.Authorization;
       }
     };
 
@@ -83,12 +94,13 @@ export default function App() {
 
   const resetLoginState = () => {
     setMobile('');
-    setOtp('');
-    setStep(1);
+    setPassword('');
+    setRegistrationPassword('');
+    setRegistrationPasswordConfirmation('');
     setLoading(false);
     setIsLoggedIn(false);
-    setUserRole(null);
     setCurrentUser(null);
+    delete api.defaults.headers.common.Authorization;
     setLatestBooking(null);
     setSelectedBike(null);
   };
@@ -99,22 +111,103 @@ export default function App() {
     setScreen('LOGIN');
   };
 
+  const completeLogin = async (user, token) => {
+    if (user.role === 'SUPER_ADMIN') {
+      Alert.alert(
+        'Use the Super Admin app',
+        'Platform management is available in the separate Super Admin app.'
+      );
+      return;
+    }
+
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+    setCurrentUser(user);
+    routeUser(user);
+    await AsyncStorage.setItem(
+      'user',
+      JSON.stringify({ user, token })
+    );
+    setIsLoggedIn(true);
+    setPassword('');
+    setRegistrationPassword('');
+    setRegistrationPasswordConfirmation('');
+    Alert.alert('Success', `Welcome ${user.mobile}`);
+  };
+
+  const loginWithPassword = async () => {
+    if (!indianMobileRegex.test(mobile.trim())) {
+      Alert.alert('Validation', 'Please enter a valid 10 digit Indian mobile number');
+      return;
+    }
+
+    if (!password) {
+      Alert.alert('Validation', 'Please enter your password');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await api.post('/auth/login', {
+        mobile: mobile.trim(),
+        password,
+      });
+      await completeLogin(response.data.user, response.data.token);
+    } catch (error) {
+      Alert.alert(
+        'Login failed',
+        getFriendlyErrorMessage(
+          error,
+          'Invalid mobile number or password.'
+        )
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const registerWithPassword = async () => {
+    if (!indianMobileRegex.test(mobile.trim())) {
+      Alert.alert('Validation', 'Please enter a valid 10 digit Indian mobile number');
+      return;
+    }
+
+    if (registrationPassword.length < 8) {
+      Alert.alert('Validation', 'Password must be at least 8 characters');
+      return;
+    }
+
+    if (registrationPassword !== registrationPasswordConfirmation) {
+      Alert.alert('Validation', 'Passwords do not match');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await api.post('/auth/register', {
+        mobile: mobile.trim(),
+        role: registrationRole,
+        password: registrationPassword,
+      });
+      await completeLogin(response.data.user, response.data.token);
+    } catch (error) {
+      Alert.alert(
+        'Registration failed',
+        getFriendlyErrorMessage(
+          error,
+          'Unable to create your account. Please try again.'
+        )
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
 if (screen === 'ADMIN_EARNINGS') {
   return (
     <AdminEarningsScreen
       adminMobile={currentUser?.mobile}
       onBack={() =>
         setScreen('ADMIN')
-      }
-    />
-  );
-}
-
-if (screen === 'SUPER_ADMIN') {
-  return (
-    <SuperAdminDashboard
-      onLogout={() =>
-        handleLogout()
       }
     />
   );
@@ -244,127 +337,6 @@ if (screen === 'AVAILABLE_BIKES') {
     />
   );
 }
-  const sendOtp = async () => {
-    try {
-      const trimmedMobile =
-        mobile.trim();
-
-      if (!trimmedMobile) {
-        Alert.alert(
-          'Validation',
-          'Please enter mobile number'
-        );
-        return;
-      }
-
-      if (!indianMobileRegex.test(trimmedMobile)) {
-        Alert.alert(
-          'Validation',
-          'Please enter a valid 10 digit Indian mobile number'
-        );
-        return;
-      }
-
-      setLoading(true);
-
-      const response = await api.post(
-        '/auth/send-otp',
-        {
-          mobile: trimmedMobile,
-        }
-      );
-
-      console.log(
-        'SEND OTP RESPONSE',
-        response.data
-      );
-
-      Alert.alert(
-        'OTP Sent',
-        response.data.otp
-          ? `Local mock OTP: ${response.data.otp}`
-          : 'Please check your SMS for the OTP'
-      );
-
-      setStep(2);
-    } catch (error) {
-      console.log(
-        'SEND OTP ERROR',
-        error?.response?.data || error
-      );
-
-      Alert.alert(
-        'Error',
-        getFriendlyErrorMessage(
-          error,
-          'Unable to send OTP right now. Please try again.'
-        )
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const verifyOtp = async () => {
-    try {
-      if (!otp) {
-        Alert.alert(
-          'Validation',
-          'Please enter OTP'
-        );
-        return;
-      }
-
-      setLoading(true);
-
-      const response = await api.post(
-        '/auth/verify-otp',
-        {
-          mobile,
-          otp,
-        }
-      );
-
-      console.log(
-        'VERIFY RESPONSE',
-        response.data
-      );
-
-      const user = response.data.user;
-      setUserRole(user.role);
-      setCurrentUser(user);
-
-routeUser(user);
-
-await AsyncStorage.setItem(
-  'user',
-  JSON.stringify(user)
-);
-
-setIsLoggedIn(true);
-
-Alert.alert(
-  'Success',
-  `Welcome ${user.mobile}`
-);
-    } catch (error) {
-      console.log(
-        'VERIFY ERROR',
-        error?.response?.data || error
-      );
-
-      Alert.alert(
-        'Error',
-        getFriendlyErrorMessage(
-          error,
-          'OTP verification failed. Please try again.'
-        )
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <SafeAreaView
       style={{
@@ -438,7 +410,7 @@ Alert.alert(
               maxWidth: 280,
             }}
           >
-            Explore bikes, hotels and city rides with instant OTP login.
+            Sign in or create an account with your mobile number and password.
           </Text>
         </View>
 
@@ -468,7 +440,7 @@ Alert.alert(
           >
 
         <TextInput
-          placeholder="Enter Mobile Number"
+          placeholder="Mobile number (username)"
           placeholderTextColor="#777"
           keyboardType="phone-pad"
           value={mobile}
@@ -476,8 +448,7 @@ Alert.alert(
             setMobile(
               value.replace(/\D/g, '').slice(0, 10)
             );
-            setOtp('');
-            setStep(1);
+            setPassword('');
             setIsLoggedIn(false);
           }}
           editable={!loading}
@@ -485,19 +456,21 @@ Alert.alert(
             backgroundColor: '#FFFFFF',
             borderRadius: 12,
             padding: 18,
-            marginBottom: step === 2 ? 14 : 0,
+            marginBottom: 14,
             fontSize: 16,
           }}
         />
 
-        {step === 2 && (
+        {authMode === 'password' && (
           <TextInput
-            placeholder="Enter OTP"
-            placeholderTextColor="#999"
-            keyboardType="number-pad"
-            value={otp}
-            onChangeText={setOtp}
+            placeholder="Password"
+            placeholderTextColor="#777"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            autoCapitalize="none"
             editable={!loading}
+            onSubmitEditing={loginWithPassword}
             style={{
               backgroundColor: '#FFFFFF',
               borderRadius: 12,
@@ -506,55 +479,166 @@ Alert.alert(
             }}
           />
         )}
-          </View>
 
-        {step === 1 ? (
-          <TouchableOpacity
-            onPress={sendOtp}
-            disabled={loading}
-            style={{
-              backgroundColor: '#F5C400',
-              padding: 18,
-              borderRadius: 14,
-              alignItems: 'center',
-            }}
-          >
-            <Text
-              style={{
-                color: '#111111',
-                fontWeight: 'bold',
-                fontSize: 16,
-              }}
-            >
-              {loading
-                ? 'Sending OTP...'
-                : 'Send OTP'}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={verifyOtp}
-             disabled={loading || isLoggedIn}
-            style={{
-              backgroundColor: '#22C55E',
-              padding: 18,
-              borderRadius: 14,
-              alignItems: 'center',
-            }}
-          >
+        {authMode === 'register' && (
+          <>
             <Text
               style={{
                 color: '#FFFFFF',
-                fontWeight: 'bold',
-                fontSize: 16,
+                fontWeight: '700',
+                marginBottom: 10,
               }}
             >
-              {loading
-                ? 'Verifying...'
-                : 'Verify OTP'}
+              Choose how to use BikeRental
             </Text>
-          </TouchableOpacity>
+            <View
+              style={{
+                flexDirection: 'row',
+                gap: 8,
+                marginBottom: 14,
+              }}
+            >
+              {[
+                { label: 'Rent a bike', value: 'USER' },
+                { label: 'Register your bike', value: 'ADMIN' },
+              ].map((role) => (
+                <TouchableOpacity
+                  key={role.value}
+                  onPress={() => setRegistrationRole(role.value)}
+                  disabled={loading}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    paddingHorizontal: 4,
+                    borderRadius: 10,
+                    backgroundColor:
+                      registrationRole === role.value
+                        ? '#F5C400'
+                        : '#2A2A2A',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      color:
+                        registrationRole === role.value
+                          ? '#111111'
+                          : '#FFFFFF',
+                      fontSize: 12,
+                      fontWeight: '700',
+                    }}
+                  >
+                    {role.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              placeholder="Create password (min 8 characters)"
+              placeholderTextColor="#777"
+              value={registrationPassword}
+              onChangeText={setRegistrationPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              editable={!loading}
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                padding: 18,
+                marginBottom: 14,
+                fontSize: 16,
+              }}
+            />
+            <TextInput
+              placeholder="Confirm password"
+              placeholderTextColor="#777"
+              value={registrationPasswordConfirmation}
+              onChangeText={setRegistrationPasswordConfirmation}
+              secureTextEntry
+              autoCapitalize="none"
+              editable={!loading}
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                padding: 18,
+                marginBottom:
+                  registrationRole === 'USER' ? 0 : 14,
+                fontSize: 16,
+              }}
+            />
+          </>
         )}
+
+          </View>
+
+        <TouchableOpacity
+          onPress={authMode === 'register' ? registerWithPassword : loginWithPassword}
+          disabled={loading}
+          style={{
+            backgroundColor: '#F5C400',
+            padding: 18,
+            borderRadius: 14,
+            alignItems: 'center',
+          }}
+        >
+          <Text
+            style={{
+              color: '#111111',
+              fontWeight: 'bold',
+              fontSize: 16,
+            }}
+          >
+            {loading
+              ? authMode === 'register' ? 'Creating account...' : 'Signing in...'
+              : authMode === 'register' ? 'Create account' : 'Sign in'}
+          </Text>
+        </TouchableOpacity>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'center',
+              flexWrap: 'wrap',
+              marginTop: 8,
+            }}
+          >
+            {[
+              { mode: 'password', label: 'Already have an account? Sign in' },
+              { mode: 'register', role: 'USER', label: 'Rent a bike' },
+              { mode: 'register', role: 'ADMIN', label: 'Register your bike' },
+            ]
+              .filter((option) =>
+                option.mode !== authMode ||
+                (option.mode === 'register' && option.role !== registrationRole)
+              )
+              .map((option) => (
+                <TouchableOpacity
+                  key={`${option.mode}-${option.role || 'login'}`}
+                  onPress={() => {
+                    setAuthMode(option.mode);
+                    if (option.role) {
+                      setRegistrationRole(option.role);
+                    }
+                    setPassword('');
+                    setRegistrationPassword('');
+                    setRegistrationPasswordConfirmation('');
+                  }}
+                  disabled={loading}
+                  style={{
+                    padding: 12,
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: '#F5C400',
+                      fontWeight: '600',
+                    }}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+          </View>
           <Text
             style={{
               color: '#777',
@@ -563,7 +647,9 @@ Alert.alert(
               fontSize: 12,
             }}
           >
-            Admin: 9986328111 | Super Admin: 9999999999
+            {authMode === 'register'
+              ? 'Create your account with a mobile number and password.'
+              : 'Use your mobile number as your username.'}
           </Text>
         </View>
         </ScrollView>

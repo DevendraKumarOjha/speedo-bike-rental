@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101827">
+    <title>Speedo | Super Admin</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section id="login-panel" class="login-panel">
+        <p class="eyebrow">SPEEDO PLATFORM</p>
+        <h1>Super Admin</h1>
+        <p class="muted">Sign in to manage the platform, review activity and record weekly settlements.</p>
+        <form id="login-form">
+          <label for="mobile">Super Admin mobile</label>
+          <input id="mobile" name="mobile" inputmode="numeric" autocomplete="username" required maxlength="10">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button class="primary" type="submit">Sign in</button>
+          <p id="login-error" class="error" role="alert"></p>
+        </form>
+        <p class="footnote">This portal is for platform owners only. Admin and rider accounts cannot access it.</p>
+      </section>
+
+      <section id="dashboard" hidden>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">PLATFORM CONTROL</p>
+            <h1>Super Admin</h1>
+          </div>
+          <button id="logout" class="secondary" type="button">Sign out</button>
+        </header>
+
+        <p id="dashboard-error" class="error" role="alert"></p>
+        <section id="metrics" class="metrics" aria-label="Platform totals"></section>
+
+        <section class="panel payout-panel">
+          <div>
+            <h2>Weekly admin settlement</h2>
+            <p class="muted">Record demo ledger payouts for all pending provider balances. This does not move real money.</p>
+          </div>
+          <button id="settle" class="primary" type="button">Record weekly settlement</button>
+        </section>
+
+        <section class="panel">
+          <h2>Users and providers</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Mobile</th><th>Role</th><th>Account ID</th></tr></thead>
+              <tbody id="users"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Registered bikes</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Bike</th><th>Provider</th><th>Location</th><th>Rate / hour</th><th>Status</th></tr></thead>
+              <tbody id="bikes"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Bookings and platform commission</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Booking</th><th>Rider</th><th>Provider</th><th>Gross</th><th>10% commission</th><th>Provider share</th><th>Status</th></tr></thead>
+              <tbody id="bookings"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Recorded settlements</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Provider</th><th>Amount</th><th>Bookings</th><th>Record status</th></tr></thead>
+              <tbody id="settlements"></tbody>
+            </table>
+          </div>
+        </section>
+        <p class="footnote">Payments and settlements are demo records only. No real payment provider or bank transfer is configured.</p>
+      </section>
+    </main>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

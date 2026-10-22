@@ -19,26 +19,16 @@ export default function getFriendlyErrorMessage(
   const serverMessage =
     error?.response?.data?.message || '';
 
-  const lowerMessage =
-    serverMessage.toLowerCase();
-
   if (
-    lowerMessage.includes('invalid otp') ||
-    lowerMessage.includes('otp expired')
-  ) {
-    return 'The OTP is incorrect or expired. Please request a new OTP and try again.';
-  }
-
-  if (
-    lowerMessage.includes('bike already booked') ||
-    lowerMessage.includes('already taken')
+    serverMessage.toLowerCase().includes('bike already booked') ||
+    serverMessage.toLowerCase().includes('already taken')
   ) {
     return 'Sorry, this bike was just booked by someone else. Please choose another available bike.';
   }
 
   if (
-    lowerMessage.includes('payment') ||
-    lowerMessage.includes('failed')
+    serverMessage.toLowerCase().includes('payment') ||
+    serverMessage.toLowerCase().includes('failed')
   ) {
     return 'Payment could not be completed. No booking was created. Please try again.';
   }

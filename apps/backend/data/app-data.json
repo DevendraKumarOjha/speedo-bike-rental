@@ -18,7 +18,7 @@
     {
       "id": 1780207110680,
       "mobile": "9999999999",
-      "role": "SUPER_ADMIN"
+      "role": "USER"
     },
     {
       "id": 1780207403625,
@@ -29,6 +29,12 @@
       "id": 1780211959416,
       "mobile": "6269118091",
       "role": "USER"
+    },
+    {
+      "id": 1792642281657,
+      "mobile": "7777777777",
+      "role": "SUPER_ADMIN",
+      "passwordHash": "$2a$12$q1RJEW/CWy8org6ZDO3xfeYmXPcOMlHGo6jPrju0gZTp3gaKabyl6"
     }
   ],
   "bikes": [
@@ -371,9 +377,10 @@
       "createdAt": "2026-05-31T07:40:55.133Z"
     }
   ],
+  "settlements": [],
   "wallets": {
     "superAdmin": {
-      "mobile": "9999999999",
+      "mobile": "7777777777",
       "balance": 143,
       "totalCommission": 143,
       "totalGrossReceived": 1430,

@@ -1,17 +1,20 @@
 const fs = require('fs');
 const path = require('path');
 
-const dataDir = path.join(__dirname, 'data');
-const dataFile = path.join(dataDir, 'app-data.json');
+const dataFile = process.env.APP_DATA_FILE
+  ? path.resolve(process.env.APP_DATA_FILE)
+  : path.join(__dirname, 'data', 'app-data.json');
+const dataDir = path.dirname(dataFile);
 
 const defaultState = {
   users: [],
   bikes: [],
   bookings: [],
   payments: [],
+  settlements: [],
   wallets: {
     superAdmin: {
-      mobile: '9999999999',
+      mobile: '7777777777',
       balance: 0,
       totalCommission: 0,
       totalGrossReceived: 0,
@@ -48,6 +51,7 @@ const loadState = () => {
     return {
       ...defaultState,
       ...storedState,
+      settlements: storedState.settlements || [],
       wallets: {
         ...defaultState.wallets,
         ...storedState.wallets,

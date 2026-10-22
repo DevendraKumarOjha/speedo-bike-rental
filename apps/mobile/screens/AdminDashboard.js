@@ -132,7 +132,7 @@ export default function AdminDashboard({
         {[
           ['Total Bikes', bikeCount],
           ['Active Bikes', activeBikes],
-          ['Booked Amount', `Rs ${earnings?.totalGross || 0}`],
+          ['Total Earnings', `Rs ${earnings?.totalEarnings || 0}`],
           ['Payout Balance', `Rs ${earnings?.pendingSettlementAmount || 0}`],
           ['Wallet Balance', `Rs ${earnings?.wallet?.balance || 0}`],
         ].map(([label, value]) => (
