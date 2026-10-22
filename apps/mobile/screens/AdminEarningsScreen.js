@@ -24,35 +24,31 @@ export default function AdminEarningsScreen({
   const [loading, setLoading] =
     useState(true);
 
-  const loadEarnings =
-    async () => {
+  useEffect(() => {
+    let isCurrent = true;
 
-      try {
-
-        const response =
-          await api.get(
-            `/admin/earnings/${adminMobile}`
-          );
-
-        setSummary(response.data);
-
-      } catch (error) {
-
+    api.get(`/admin/earnings/${adminMobile}`)
+      .then((response) => {
+        if (isCurrent) {
+          setSummary(response.data);
+        }
+      })
+      .catch((error) => {
         console.log(
           'ADMIN EARNINGS ERROR',
           error?.response?.data || error
         );
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setLoading(false);
+        }
+      });
 
-      } finally {
-
-        setLoading(false);
-
-      }
+    return () => {
+      isCurrent = false;
     };
-
-  useEffect(() => {
-    loadEarnings();
-  }, []);
+  }, [adminMobile]);
 
   if (loading) {
     return (
@@ -116,6 +112,15 @@ export default function AdminEarningsScreen({
         >
           Rs {summary?.pendingSettlementAmount || 0} pending weekly payout
         </Text>
+        <Text
+          style={{
+            color: '#D7D7D7',
+            marginTop: 6,
+          }}
+        >
+          Earnings shown below are after the{' '}
+          {Math.round((summary?.commissionRate || 0) * 100)}% platform fee.
+        </Text>
       </View>
 
       <View
@@ -127,9 +132,13 @@ export default function AdminEarningsScreen({
         }}
       >
         {[
-          ['Booked', summary?.totalGross || 0],
-          ['Commission', summary?.totalCommission || 0],
-          ['Earnings', summary?.totalEarnings || 0],
+          ['Gross ride amount', summary?.totalGrossAmount || 0],
+          [
+            `Platform fee (${Math.round((summary?.commissionRate || 0) * 100)}%)`,
+            summary?.totalPlatformCommission || 0,
+          ],
+          ['Net earnings after fee', summary?.totalEarnings || 0],
+          ['Pending payout', summary?.pendingSettlementAmount || 0],
           ['Settled', summary?.settledAmount || 0],
         ].map(([label, value]) => (
           <View
@@ -205,15 +214,12 @@ export default function AdminEarningsScreen({
             >
               {item.bikeName}
             </Text>
+            <Text>Ride amount: Rs {item.grossAmount || 0}</Text>
             <Text>
-              Gross: Rs {item.grossAmount}
+              Platform fee ({Math.round((summary?.commissionRate || 0) * 100)}%): Rs{' '}
+              {item.superAdminCommission || 0}
             </Text>
-            <Text>
-              Commission: Rs {item.superAdminCommission}
-            </Text>
-            <Text>
-              Admin Amount: Rs {item.adminAmount}
-            </Text>
+            <Text>Admin net amount: Rs {item.adminAmount || 0}</Text>
             <Text
               style={{
                 color:

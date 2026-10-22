@@ -3,27 +3,202 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const path = require('path');
 
-const otpStore = require('./otpStore');
 const dataStore = require('./dataStore');
 
 const app = express();
+const asyncHandler = (handler) => (req, res, next) =>
+  Promise.resolve(handler(req, res, next)).catch(next);
 
-const ADMIN_MOBILE = '9986328111';
-const SUPER_ADMIN_MOBILE = '9999999999';
-const SUPER_ADMIN_COMMISSION_RATE = 0.10;
+const ADMIN_MOBILE =
+  process.env.ADMIN_LOGIN_MOBILE || '8888888888';
+const ADMIN_LOGIN_PASSWORD = '00000000';
+const SUPER_ADMIN_ACCOUNTS = [
+  // Development bootstrap account; production startup below rejects these credentials.
+  { mobile: '9024280547', password: '00000000' },
+];
+if (process.env.NODE_ENV === 'production') {
+  throw new Error(
+    'Replace the hard-coded Super Admin bootstrap credentials before running in production'
+  );
+}
+const SUPER_ADMIN_COMMISSION_RATE = Number(
+  process.env.SUPER_ADMIN_COMMISSION_RATE || 0.10
+);
+if (
+  !Number.isFinite(SUPER_ADMIN_COMMISSION_RATE) ||
+  SUPER_ADMIN_COMMISSION_RATE < 0 ||
+  SUPER_ADMIN_COMMISSION_RATE > 1
+) {
+  throw new Error('SUPER_ADMIN_COMMISSION_RATE must be between 0 and 1');
+}
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
-const OTP_MODE =
-  process.env.OTP_MODE ||
-  (process.env.NODE_ENV === 'production'
-    ? 'sms'
-    : 'mock');
+const configuredTokenSecret =
+  process.env.JWT_SECRET || process.env.SESSION_SECRET;
+if (
+  process.env.NODE_ENV === 'production' &&
+  (!configuredTokenSecret ||
+    configuredTokenSecret === 'replace-this-for-production' ||
+    configuredTokenSecret === 'replace-with-a-long-random-secret')
+) {
+  throw new Error('Configure a unique JWT_SECRET before running in production');
+}
+const JWT_SECRET =
+  configuredTokenSecret || 'bike-rental-local-secret';
+let bikes;
+let bookings;
+let payments;
+let users;
+let wallets;
+let settlementHistory;
+const PASSWORD_LENGTH = 8;
+const PASSWORD_REGEX = /^\d{8}$/;
+const BCRYPT_MAX_PASSWORD_BYTES = 72;
+const REGISTRATION_ROLES = ['USER', 'ADMIN'];
 
-const bikes = dataStore.state.bikes;
-const bookings = dataStore.state.bookings;
-const payments = dataStore.state.payments;
-const users = dataStore.state.users;
-const wallets = dataStore.state.wallets;
+const validatePassword = (password) => {
+  return typeof password === 'string' && PASSWORD_REGEX.test(password);
+};
+
+const getPublicUser = (user) => {
+  const { passwordHash, ...publicUser } = user;
+  return publicUser;
+};
+
+const createAuthToken = (user) =>
+  jwt.sign(
+    {
+      id: user.id,
+      mobile: user.mobile,
+      role: user.role,
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+const authenticate = (req, res, next) => {
+  const authorization = req.get('authorization') || '';
+  const [scheme, token] = authorization.split(' ');
+
+  if (scheme !== 'Bearer' || !token) {
+    return res.status(401).json({
+      message: 'Sign in to access this resource',
+    });
+  }
+
+  try {
+    const claims = jwt.verify(token, JWT_SECRET);
+    const user = users.find(
+      (candidate) =>
+        candidate.id === claims.id &&
+        candidate.mobile === claims.mobile &&
+        candidate.role === claims.role
+    );
+
+    if (!user) {
+      return res.status(401).json({
+        message: 'Your account session is no longer valid',
+      });
+    }
+
+    req.user = getPublicUser(user);
+    return next();
+  } catch (error) {
+    return res.status(401).json({
+      message: 'Your session is invalid or has expired. Please sign in again.',
+    });
+  }
+};
+
+const requireRole = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user.role)) {
+    return res.status(403).json({
+      message: 'You do not have permission to access this resource',
+    });
+  }
+
+  return next();
+};
+
+const provisionPrivilegedAccount = async (
+  mobile,
+  role,
+  password
+) => {
+  if (!password) {
+    console.warn(
+      `${role} password login is not configured; set its backend environment password`
+    );
+    return false;
+  }
+
+  if (!INDIAN_MOBILE_REGEX.test(mobile)) {
+    throw new Error(`${role} login mobile must be a valid Indian mobile number`);
+  }
+
+  if (!validatePassword(password)) {
+    throw new Error(
+      `${role} password must be exactly ${PASSWORD_LENGTH} numeric digits`
+    );
+  }
+
+  const existingUser = users.find(
+    (user) => user.mobile === mobile
+  );
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  if (existingUser) {
+    existingUser.role = role;
+    existingUser.passwordHash = passwordHash;
+  } else {
+    users.push({
+      id: Date.now(),
+      mobile,
+      role,
+      passwordHash,
+    });
+  }
+
+  return true;
+};
+
+const provisionPrivilegedAccounts = async () => {
+  const superAdminMobiles =
+    SUPER_ADMIN_ACCOUNTS.map((account) => account.mobile);
+
+  if (new Set(superAdminMobiles).size !== superAdminMobiles.length) {
+    throw new Error('Super Admin login mobiles must be unique');
+  }
+
+  if (superAdminMobiles.includes(ADMIN_MOBILE)) {
+    throw new Error(
+      'Admin and super-admin login mobiles must be different'
+    );
+  }
+
+  const accountResults = await Promise.all([
+    provisionPrivilegedAccount(
+      ADMIN_MOBILE,
+      'ADMIN',
+      ADMIN_LOGIN_PASSWORD
+    ),
+    ...SUPER_ADMIN_ACCOUNTS.map((account) =>
+      provisionPrivilegedAccount(
+        account.mobile,
+        'SUPER_ADMIN',
+        account.password
+      )
+    ),
+  ]);
+
+  if (accountResults.some(Boolean)) {
+    wallets.superAdmin.mobile = SUPER_ADMIN_ACCOUNTS[0].mobile;
+    await saveData();
+  }
+};
 
 const getAdminWallet = (mobile) => {
   if (!wallets.admins[mobile]) {
@@ -42,12 +217,10 @@ const getAdminWallet = (mobile) => {
 const roundAmount = (amount) =>
   Math.round(amount * 100) / 100;
 
-const saveData = () => {
-  dataStore.saveState();
-};
+const saveData = () => dataStore.saveState();
 
 const getUserRole = (mobile) => {
-  if (mobile === SUPER_ADMIN_MOBILE) {
+  if (SUPER_ADMIN_ACCOUNTS.some((account) => account.mobile === mobile)) {
     return 'SUPER_ADMIN';
   }
 
@@ -76,8 +249,23 @@ const getBikePublicData = (bike) => ({
   category: 'Sports',
   rating: 4.5,
   distanceKm: 1.2,
-  ...bike,
+  ...Object.fromEntries(
+    Object.entries(bike).filter(
+      ([key]) => key !== 'adminMobile'
+    )
+  ),
 });
+
+const getUserBookingData = (booking) => {
+  const {
+    adminMobile,
+    superAdminCommission,
+    adminAmount,
+    ...userBooking
+  } = booking;
+
+  return userBooking;
+};
 
 const calculateBookingAmounts = (amount) => {
   const grossAmount =
@@ -99,6 +287,20 @@ const calculateBookingAmounts = (amount) => {
     adminAmount,
   };
 };
+
+const getUnsettledAdminPayouts = (completedOnly = false) =>
+  roundAmount(
+    bookings
+      .filter(
+        (booking) =>
+          booking.settlementStatus === 'PENDING' &&
+          (!completedOnly || booking.status === 'COMPLETED')
+      )
+      .reduce(
+        (sum, booking) => sum + Number(booking.adminAmount || 0),
+        0
+      )
+  );
 
 const applyBookingFinancialDelta = (
   booking,
@@ -229,6 +431,12 @@ app.use(cors());
 
 app.use(express.json());
 
+app.use('/api/admin', authenticate, requireRole('ADMIN'));
+app.use('/api/super-admin', authenticate, requireRole('SUPER_ADMIN'));
+app.use('/api/payments', authenticate, requireRole('USER'));
+app.use('/api/bookings', authenticate, requireRole('USER'));
+app.use('/api/profile', authenticate);
+
 app.use(
   session({
     secret:
@@ -241,137 +449,148 @@ app.use(
 
 app.get('/', (req, res) => {
   res.json({
-    message: 'OTP Backend Running',
+    message: 'Bike Rental API Running',
   });
 });
 app.get('/api/test', (req, res) => {
   res.json({
     success: true,
     message: 'Backend reachable',
-    otpMode: OTP_MODE,
+    authentication: 'password',
   });
 });
 
-// SEND OTP
-app.post('/api/auth/send-otp', (req, res) => {
+const otpDisabled = (_req, res) =>
+  res.status(410).json({
+    message: 'OTP authentication is temporarily disabled. Use your mobile number and password.',
+  });
+
+app.post('/api/auth/send-otp', otpDisabled);
+app.post('/api/auth/verify-otp', otpDisabled);
+
+app.post('/api/auth/login', async (req, res) => {
   try {
-    const mobile =
-      String(req.body.mobile || '').trim();
+    const mobile = String(req.body.mobile || '').trim();
+    const password = req.body.password;
 
-    if (!mobile) {
-      return res.status(400).json({
-        message: 'Mobile number required',
+    if (
+      !INDIAN_MOBILE_REGEX.test(mobile) ||
+      typeof password !== 'string' ||
+      password.length === 0 ||
+      Buffer.byteLength(password, 'utf8') > BCRYPT_MAX_PASSWORD_BYTES
+    ) {
+      return res.status(401).json({
+        message: 'Invalid mobile number or password',
       });
     }
 
-    if (!INDIAN_MOBILE_REGEX.test(mobile)) {
-      return res.status(400).json({
-        message:
-          'Please enter a valid 10 digit Indian mobile number',
-      });
-    }
-
-    // Generate 6 digit OTP
-    const otp =
-      Math.floor(
-        100000 + Math.random() * 900000
-      ).toString();
-
-    otpStore[mobile] = otp;
-
-    console.log(
-      `OTP for ${mobile}: ${otp}`
+    const user = users.find(
+      (candidate) => candidate.mobile === mobile
     );
 
-    const response = {
-      message: 'OTP sent successfully',
-      otpMode: OTP_MODE,
-    };
-
-    if (OTP_MODE === 'mock') {
-      response.otp = otp;
-      response.message =
-        'Mock OTP generated successfully';
-    }
-
-    res.json(response);
-
-  } catch (error) {
-    res.status(500).json({
-      message: error.message,
-    });
-  }
-});
-
-
-// VERIFY OTP
-app.post('/api/auth/verify-otp', (req, res) => {
-  try {
-
-    const mobile =
-      String(req.body.mobile || '').trim();
-    const otp =
-      String(req.body.otp || '').trim();
-
-    if (!INDIAN_MOBILE_REGEX.test(mobile)) {
-      return res.status(400).json({
-        message:
-          'Please enter a valid 10 digit Indian mobile number',
+    if (
+      !user?.passwordHash ||
+      !(await bcrypt.compare(password, user.passwordHash))
+    ) {
+      return res.status(401).json({
+        message: 'Invalid mobile number or password',
       });
     }
 
-    const storedOtp =
-      otpStore[mobile];
+    const publicUser = getPublicUser(user);
+    req.session.user = publicUser;
 
-    if (!storedOtp) {
-      return res.status(400).json({
-        message: 'OTP expired',
-      });
-    }
-
-    if (storedOtp !== otp) {
-      return res.status(400).json({
-        message: 'Invalid OTP',
-      });
-    }
-
-    let user = users.find(
-      (u) => u.mobile === mobile
-    );
-
-   if (!user) {
-
-  user = {
-    id: Date.now(),
-    mobile,
-    role: getUserRole(mobile),
-  };
-
-  users.push(user);
-  saveData();
-}
-console.log(
-  'USER LOGIN:',
-  user
-);
-
-    req.session.user = user;
-
-    delete otpStore[mobile];
-
-    res.json({
+    return res.json({
       message: 'Login successful',
-      user,
+      user: publicUser,
+      token: createAuthToken(user),
     });
-
   } catch (error) {
-    res.status(500).json({
-      message: error.message,
+    console.error('Password login failed:', error.message);
+    return res.status(500).json({
+      message: 'Unable to log in right now. Please try again.',
     });
   }
 });
 
-app.post('/api/admin/bikes', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const mobile = String(req.body.mobile || '').trim();
+    const role = String(req.body.role || '').trim().toUpperCase();
+    const password = req.body.password;
+
+    if (!INDIAN_MOBILE_REGEX.test(mobile)) {
+      return res.status(400).json({
+        message: 'Please enter a valid 10 digit Indian mobile number',
+      });
+    }
+
+    if (!REGISTRATION_ROLES.includes(role)) {
+      return res.status(400).json({
+        message: 'Select a valid account type',
+      });
+    }
+
+    if (!validatePassword(password)) {
+      return res.status(400).json({
+        message: 'Password must be exactly 8 numeric digits',
+      });
+    }
+
+    const existingUser = users.find(
+      (candidate) => candidate.mobile === mobile
+    );
+
+    if (existingUser?.passwordHash) {
+      return res.status(409).json({
+        message: 'An account already exists for this mobile number. Please sign in.',
+      });
+    }
+
+    if (existingUser && existingUser.role !== role) {
+      return res.status(409).json({
+        message: 'This mobile number is already registered for a different account type.',
+      });
+    }
+
+    const mobileRole = getUserRole(mobile);
+
+    if (mobileRole !== 'USER' && mobileRole !== role) {
+      return res.status(409).json({
+        message: 'This mobile number is reserved for a different account type',
+      });
+    }
+
+    const user = existingUser || {
+      id: Date.now(),
+      mobile,
+      role,
+    };
+    user.role = role;
+    user.passwordHash = await bcrypt.hash(password, 12);
+
+    if (!existingUser) {
+      users.push(user);
+    }
+    await saveData();
+
+    const publicUser = getPublicUser(user);
+    req.session.user = publicUser;
+
+    return res.status(201).json({
+      message: 'Registration successful',
+      user: publicUser,
+      token: createAuthToken(user),
+    });
+  } catch (error) {
+    console.error('Account registration failed:', error.message);
+    return res.status(500).json({
+      message: 'Unable to register right now. Please try again.',
+    });
+  }
+});
+
+app.post('/api/admin/bikes', asyncHandler(async (req, res) => {
   try {
 
     const {
@@ -380,18 +599,17 @@ app.post('/api/admin/bikes', (req, res) => {
       city,
       hotelName,
       pricePerHour,
-      adminMobile,
       imageUrl,
       hotelImageUrl,
       category,
     } = req.body;
+    const adminMobile = req.user.mobile;
 
     if (
       !bikeName ||
       !bikeNumber ||
       !city ||
       !hotelName ||
-      !adminMobile ||
       !Number(pricePerHour)
     ) {
       return res.status(400).json({
@@ -419,7 +637,7 @@ app.post('/api/admin/bikes', (req, res) => {
 
     bikes.push(bike);
     getAdminWallet(adminMobile);
-    saveData();
+    await saveData();
 
     res.json({
       message: 'Bike Added Successfully',
@@ -431,7 +649,7 @@ app.post('/api/admin/bikes', (req, res) => {
       message: error.message,
     });
   }
-});
+}));
 app.get('/api/bikes', (req, res) => {
   res.json(
     bikes.map(getBikePublicData)
@@ -443,6 +661,12 @@ app.get(
 
     const mobile =
       req.params.mobile;
+
+    if (mobile !== req.user.mobile) {
+      return res.status(403).json({
+        message: 'You can only access your own bikes',
+      });
+    }
 
     const adminBikes =
       bikes.filter(
@@ -457,7 +681,7 @@ app.get(
   }
 );
 
-app.put('/api/admin/bikes/:id', (req, res) => {
+app.put('/api/admin/bikes/:id', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.params.id);
 
@@ -470,6 +694,12 @@ app.put('/api/admin/bikes/:id', (req, res) => {
   if (!bike) {
     return res.status(404).json({
       message: 'Bike not found',
+    });
+  }
+
+  if (bike.adminMobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only update your own bikes',
     });
   }
 
@@ -504,15 +734,15 @@ app.put('/api/admin/bikes/:id', (req, res) => {
   }
 
   bike.updatedAt = new Date();
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike updated successfully',
     bike: getBikePublicData(bike),
   });
-});
+}));
 
-app.patch('/api/admin/bikes/:id/status', (req, res) => {
+app.patch('/api/admin/bikes/:id/status', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.params.id);
   const status =
@@ -543,6 +773,12 @@ app.patch('/api/admin/bikes/:id/status', (req, res) => {
     });
   }
 
+  if (bike.adminMobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only manage your own bikes',
+    });
+  }
+
   const hasActiveBooking =
     bookings.some(
       booking =>
@@ -561,15 +797,15 @@ app.patch('/api/admin/bikes/:id/status', (req, res) => {
 
   bike.status = status;
   bike.updatedAt = new Date();
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike status updated successfully',
     bike: getBikePublicData(bike),
   });
-});
+}));
 
-app.delete('/api/admin/bikes/:id', (req, res) => {
+app.delete('/api/admin/bikes/:id', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.params.id);
 
@@ -582,6 +818,12 @@ app.delete('/api/admin/bikes/:id', (req, res) => {
   if (bikeIndex === -1) {
     return res.status(404).json({
       message: 'Bike not found',
+    });
+  }
+
+  if (bikes[bikeIndex].adminMobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only delete your own bikes',
     });
   }
 
@@ -604,17 +846,30 @@ app.delete('/api/admin/bikes/:id', (req, res) => {
   const [deletedBike] =
     bikes.splice(bikeIndex, 1);
 
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike deleted successfully',
     bike: deletedBike,
   });
-});
+}));
 
 app.get('/api/admin/bikes/:id/bookings', (req, res) => {
   const bikeId =
     Number(req.params.id);
+  const bike = bikes.find((item) => item.id === bikeId);
+
+  if (!bike) {
+    return res.status(404).json({
+      message: 'Bike not found',
+    });
+  }
+
+  if (bike.adminMobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only view bookings for your own bikes',
+    });
+  }
 
   const bikeBookings =
     bookings
@@ -628,7 +883,11 @@ app.get('/api/admin/bikes/:id/bookings', (req, res) => {
           new Date(a.bookingTime)
       );
 
-  res.json(bikeBookings);
+  res.json(
+    bikeBookings.map(
+      ({ superAdminCommission, userMobile, grossAmount, ...booking }) => booking
+    )
+  );
 });
 
 app.get(
@@ -638,30 +897,34 @@ app.get(
     const mobile =
       req.params.mobile;
 
+    if (mobile !== req.user.mobile) {
+      return res.status(403).json({
+        message: 'You can only access your own earnings',
+      });
+    }
+
     const adminBookings =
       bookings.filter(
         booking =>
           booking.adminMobile === mobile
       );
 
-    const totalGross =
-      adminBookings.reduce(
-        (sum, booking) =>
-          sum + booking.grossAmount,
-        0
-      );
-
-    const totalCommission =
-      adminBookings.reduce(
-        (sum, booking) =>
-          sum + booking.superAdminCommission,
-        0
-      );
-
     const totalEarnings =
       adminBookings.reduce(
         (sum, booking) =>
-          sum + booking.adminAmount,
+          sum + Number(booking.adminAmount || 0),
+        0
+      );
+    const totalGrossAmount =
+      adminBookings.reduce(
+        (sum, booking) =>
+          sum + Number(booking.grossAmount || 0),
+        0
+      );
+    const totalPlatformCommission =
+      adminBookings.reduce(
+        (sum, booking) =>
+          sum + Number(booking.superAdminCommission || 0),
         0
       );
 
@@ -670,7 +933,8 @@ app.get(
         .filter(
           booking =>
             booking.settlementStatus ===
-            'PENDING'
+            'PENDING' &&
+            booking.status === 'COMPLETED'
         )
         .reduce(
           (sum, booking) =>
@@ -693,13 +957,17 @@ app.get(
 
     res.json({
       wallet: getAdminWallet(mobile),
-      totalGross: roundAmount(totalGross),
-      totalCommission: roundAmount(totalCommission),
       totalEarnings: roundAmount(totalEarnings),
+      totalGrossAmount: roundAmount(totalGrossAmount),
+      totalPlatformCommission:
+        roundAmount(totalPlatformCommission),
+      commissionRate: SUPER_ADMIN_COMMISSION_RATE,
       pendingSettlementAmount:
         roundAmount(pendingSettlementAmount),
       settledAmount: roundAmount(settledAmount),
-      bookings: adminBookings,
+      bookings: adminBookings.map(
+        ({ userMobile, ...booking }) => booking
+      ),
     });
   }
 );
@@ -719,40 +987,49 @@ app.get('/api/super-admin/bikes', (req, res) => {
 });
 
 app.get('/api/super-admin/wallet', (req, res) => {
-  const pendingPayouts =
-    bookings
-      .filter(
-        booking =>
-          booking.settlementStatus ===
-          'PENDING'
-      )
-      .reduce(
-        (sum, booking) =>
-          sum + booking.adminAmount,
-        0
-      );
-
   res.json({
     wallet: wallets.superAdmin,
     commissionRate:
       SUPER_ADMIN_COMMISSION_RATE,
-    pendingPayouts:
-      roundAmount(pendingPayouts),
+    pendingPayouts: getUnsettledAdminPayouts(),
+    settlementReadyPayouts: getUnsettledAdminPayouts(true),
     adminWallets:
       Object.values(wallets.admins),
     bookings,
+    settlements: settlementHistory,
   });
 });
 
-app.post('/api/super-admin/settle-weekly', (req, res) => {
+app.get('/api/super-admin/users', (req, res) => {
+  res.json(
+    users.map(({ passwordHash, ...user }) => user)
+  );
+});
+
+app.get('/api/super-admin/dashboard', (req, res) => {
+  res.json({
+    users: users.map(({ passwordHash, ...user }) => user),
+    bikes,
+    bookings,
+    wallet: wallets.superAdmin,
+    commissionRate: SUPER_ADMIN_COMMISSION_RATE,
+    pendingPayouts: getUnsettledAdminPayouts(),
+    settlementReadyPayouts: getUnsettledAdminPayouts(true),
+    settlements: settlementHistory,
+  });
+});
+
+app.post('/api/super-admin/settle-weekly', asyncHandler(async (req, res) => {
   const pendingBookings =
     bookings.filter(
       booking =>
         booking.settlementStatus ===
-        'PENDING'
+        'PENDING' &&
+        booking.status === 'COMPLETED'
     );
 
-  const settlements = {};
+  const adminTotals = {};
+  const settlementDate = new Date();
 
   pendingBookings.forEach((booking) => {
     const adminWallet =
@@ -789,55 +1066,58 @@ app.post('/api/super-admin/settle-weekly', (req, res) => {
       );
 
     booking.settlementStatus = 'SETTLED';
-    booking.settledAt = new Date();
+    booking.settledAt = settlementDate;
 
-    if (!settlements[booking.adminMobile]) {
-      settlements[booking.adminMobile] = 0;
+    if (!adminTotals[booking.adminMobile]) {
+      adminTotals[booking.adminMobile] = 0;
     }
 
-    settlements[booking.adminMobile] =
+    adminTotals[booking.adminMobile] =
       roundAmount(
-        settlements[booking.adminMobile] +
+        adminTotals[booking.adminMobile] +
         booking.adminAmount
       );
   });
 
-  saveData();
+  const settlementRecords = Object.entries(adminTotals).map(
+    ([adminMobile, amount]) => ({
+      id: `${settlementDate.getTime()}-${adminMobile}`,
+      adminMobile,
+      amount,
+      bookingIds: pendingBookings
+        .filter((booking) => booking.adminMobile === adminMobile)
+        .map((booking) => booking.id),
+      status: 'DEMO_RECORDED',
+      createdAt: settlementDate,
+    })
+  );
+  settlementHistory.push(...settlementRecords);
+  await saveData();
 
   res.json({
     message:
       'Weekly settlement completed',
     settledBookings:
       pendingBookings.length,
-    settlements,
+    settlements: settlementRecords,
     superAdminWallet:
       wallets.superAdmin,
     adminWallets:
       Object.values(wallets.admins),
   });
-});
+}));
 
-app.post('/api/payments/mock', (req, res) => {
+app.post('/api/payments/mock', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.body.bikeId);
-  const userMobile =
-    String(req.body.userMobile || '').trim();
-  const amount =
-    Number(req.body.amount);
+  const userMobile = req.user.mobile;
   const requestedStatus =
     String(req.body.status || 'SUCCESS')
       .toUpperCase();
 
-  if (!bikeId || !amount) {
+  if (!bikeId) {
     return res.status(400).json({
       message: 'Bike and amount are required',
-    });
-  }
-
-  if (!INDIAN_MOBILE_REGEX.test(userMobile)) {
-    return res.status(400).json({
-      message:
-        'Please login with a valid Indian mobile number',
     });
   }
 
@@ -863,7 +1143,7 @@ app.post('/api/payments/mock', (req, res) => {
     id: Date.now(),
     bikeId,
     userMobile,
-    amount: roundAmount(amount),
+    amount: roundAmount(Number(bike.pricePerHour)),
     provider: 'MOCK_LOCAL',
     status:
       requestedStatus === 'FAILED'
@@ -873,7 +1153,7 @@ app.post('/api/payments/mock', (req, res) => {
   };
 
   payments.push(payment);
-  saveData();
+  await saveData();
 
   res.json({
     message:
@@ -882,27 +1162,19 @@ app.post('/api/payments/mock', (req, res) => {
         : 'Mock payment failed',
     payment,
   });
-});
+}));
 
-app.post('/api/bookings', (req, res) => {
+app.post('/api/bookings', asyncHandler(async (req, res) => {
 
   const bikeId =
     Number(req.body.bikeId);
-  const userMobile =
-    String(req.body.userMobile || '').trim();
+  const userMobile = req.user.mobile;
   const paymentId =
     Number(req.body.paymentId);
 
   if (!bikeId) {
     return res.status(400).json({
       message: 'Bike is required',
-    });
-  }
-
-  if (!INDIAN_MOBILE_REGEX.test(userMobile)) {
-    return res.status(400).json({
-      message:
-        'Please login with a valid Indian mobile number',
     });
   }
 
@@ -1015,13 +1287,13 @@ app.post('/api/bookings', (req, res) => {
   };
 
   bookings.push(booking);
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike booked successfully',
-    booking,
+    booking: getUserBookingData(booking),
   });
-});
+}));
 
 app.get('/api/bookings/user/:mobile', (req, res) => {
   const mobile =
@@ -1034,6 +1306,12 @@ app.get('/api/bookings/user/:mobile', (req, res) => {
     });
   }
 
+  if (mobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only view your own bookings',
+    });
+  }
+
   const userBookings =
     bookings
       .filter(
@@ -1041,12 +1319,11 @@ app.get('/api/bookings/user/:mobile', (req, res) => {
           booking.userMobile === mobile
       )
       .map((booking) => ({
-        ...booking,
-        bike:
-          bikes.find(
-            bike =>
-              bike.id === booking.bikeId
-          ) || null,
+        ...getUserBookingData(booking),
+        bike: (() => {
+          const bike = bikes.find((item) => item.id === booking.bikeId);
+          return bike ? getBikePublicData(bike) : null;
+        })(),
       }))
       .sort(
         (a, b) =>
@@ -1057,7 +1334,7 @@ app.get('/api/bookings/user/:mobile', (req, res) => {
   res.json(userBookings);
 });
 
-app.post('/api/bookings/:id/start', (req, res) => {
+app.post('/api/bookings/:id/start', asyncHandler(async (req, res) => {
   const bookingId =
     Number(req.params.id);
 
@@ -1070,6 +1347,12 @@ app.post('/api/bookings/:id/start', (req, res) => {
   if (!booking) {
     return res.status(404).json({
       message: 'Booking not found',
+    });
+  }
+
+  if (booking.userMobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only start your own bookings',
     });
   }
 
@@ -1083,15 +1366,15 @@ app.post('/api/bookings/:id/start', (req, res) => {
   booking.status = 'ACTIVE';
   booking.tripStartTime = new Date();
 
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Trip started successfully',
-    booking,
+    booking: getUserBookingData(booking),
   });
-});
+}));
 
-app.post('/api/bookings/:id/cancel', (req, res) => {
+app.post('/api/bookings/:id/cancel', asyncHandler(async (req, res) => {
   const bookingId =
     Number(req.params.id);
 
@@ -1104,6 +1387,12 @@ app.post('/api/bookings/:id/cancel', (req, res) => {
   if (!booking) {
     return res.status(404).json({
       message: 'Booking not found',
+    });
+  }
+
+  if (booking.userMobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only cancel your own bookings',
     });
   }
 
@@ -1137,18 +1426,18 @@ app.post('/api/bookings/:id/cancel', (req, res) => {
     bike.status = 'AVAILABLE';
   }
 
-  saveData();
+  await saveData();
 
   res.json({
     message:
       'Booking cancelled and refund processed',
-    booking,
-    bike,
+    booking: getUserBookingData(booking),
+    bike: bike ? getBikePublicData(bike) : null,
     payment,
   });
-});
+}));
 
-app.post('/api/bookings/:id/complete', (req, res) => {
+app.post('/api/bookings/:id/complete', asyncHandler(async (req, res) => {
   const bookingId =
     Number(req.params.id);
 
@@ -1161,6 +1450,12 @@ app.post('/api/bookings/:id/complete', (req, res) => {
   if (!booking) {
     return res.status(404).json({
       message: 'Booking not found',
+    });
+  }
+
+  if (booking.userMobile !== req.user.mobile) {
+    return res.status(403).json({
+      message: 'You can only complete your own bookings',
     });
   }
 
@@ -1243,32 +1538,61 @@ app.post('/api/bookings/:id/complete', (req, res) => {
     bike.status = 'AVAILABLE';
   }
 
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Trip completed successfully',
-    booking,
-    pricingAdjustment,
-    bike,
+    booking: getUserBookingData(booking),
+    updatedAmount: booking.grossAmount,
+    bike: bike ? getBikePublicData(bike) : null,
   });
-});
+}));
 // PROTECTED ROUTE
 app.get('/api/profile', (req, res) => {
-
-  if (!req.session.user) {
-    return res.status(401).json({
-      message: 'Unauthorized',
-    });
-  }
-
   res.json({
-    user: req.session.user,
+    user: req.user,
   });
 });
 
+app.use('/super-admin', express.static(
+  path.join(__dirname, '..', 'super-admin')
+));
+
+app.use((error, _req, res, next) => {
+  console.error('Request failed:', error.message);
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  return res.status(500).json({
+    message: 'Unable to complete the request right now. Please try again.',
+  });
+});
 
 const port = process.env.PORT || 3002;
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Server running on port ${port} (all network interfaces)`);
-});
+dataStore.ready
+  .then(() => {
+    bikes = dataStore.state.bikes;
+    bookings = dataStore.state.bookings;
+    payments = dataStore.state.payments;
+    users = dataStore.state.users;
+    wallets = dataStore.state.wallets;
+    settlementHistory = dataStore.state.settlements;
+
+    return provisionPrivilegedAccounts();
+  })
+  .then(() => {
+    app.listen(port, '0.0.0.0', () => {
+      console.log(
+        `Server running on port ${port} (all network interfaces)`
+      );
+    });
+  })
+  .catch((error) => {
+    console.error(
+      'Unable to initialize the backend:',
+      error.message
+    );
+    process.exitCode = 1;
+  });
