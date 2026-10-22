@@ -288,6 +288,20 @@ const calculateBookingAmounts = (amount) => {
   };
 };
 
+const getUnsettledAdminPayouts = (completedOnly = false) =>
+  roundAmount(
+    bookings
+      .filter(
+        (booking) =>
+          booking.settlementStatus === 'PENDING' &&
+          (!completedOnly || booking.status === 'COMPLETED')
+      )
+      .reduce(
+        (sum, booking) => sum + Number(booking.adminAmount || 0),
+        0
+      )
+  );
+
 const applyBookingFinancialDelta = (
   booking,
   newGrossAmount
@@ -973,26 +987,12 @@ app.get('/api/super-admin/bikes', (req, res) => {
 });
 
 app.get('/api/super-admin/wallet', (req, res) => {
-  const pendingPayouts =
-    bookings
-      .filter(
-        booking =>
-          booking.settlementStatus ===
-          'PENDING' &&
-          booking.status === 'COMPLETED'
-      )
-      .reduce(
-        (sum, booking) =>
-          sum + booking.adminAmount,
-        0
-      );
-
   res.json({
     wallet: wallets.superAdmin,
     commissionRate:
       SUPER_ADMIN_COMMISSION_RATE,
-    pendingPayouts:
-      roundAmount(pendingPayouts),
+    pendingPayouts: getUnsettledAdminPayouts(),
+    settlementReadyPayouts: getUnsettledAdminPayouts(true),
     adminWallets:
       Object.values(wallets.admins),
     bookings,
@@ -1013,15 +1013,8 @@ app.get('/api/super-admin/dashboard', (req, res) => {
     bookings,
     wallet: wallets.superAdmin,
     commissionRate: SUPER_ADMIN_COMMISSION_RATE,
-    pendingPayouts: roundAmount(
-      bookings
-        .filter(
-          (booking) =>
-            booking.settlementStatus === 'PENDING' &&
-            booking.status === 'COMPLETED'
-        )
-        .reduce((sum, booking) => sum + booking.adminAmount, 0)
-    ),
+    pendingPayouts: getUnsettledAdminPayouts(),
+    settlementReadyPayouts: getUnsettledAdminPayouts(true),
     settlements: settlementHistory,
   });
 });

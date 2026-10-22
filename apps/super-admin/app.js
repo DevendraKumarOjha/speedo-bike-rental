@@ -8,6 +8,7 @@ const loginForm = document.querySelector('#login-form');
 const loginError = document.querySelector('#login-error');
 const dashboardError = document.querySelector('#dashboard-error');
 const settleButton = document.querySelector('#settle');
+let isDashboardLoading = false;
 
 const escapeHtml = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -66,10 +67,6 @@ const renderDashboard = (data) => {
   const bookings = data.bookings || [];
   const settlements = data.settlements || [];
   const wallet = data.wallet || {};
-  const commission = bookings.reduce(
-    (sum, booking) => sum + Number(booking.superAdminCommission || 0),
-    0
-  );
   const paidToAdmins = Number(wallet.totalPaidToAdmins || 0);
   const adminUsers = users.filter((user) => user.role === 'ADMIN').length;
   const riderUsers = users.filter((user) => user.role === 'USER').length;
@@ -78,6 +75,7 @@ const renderDashboard = (data) => {
     ['Platform gross', money(wallet.totalGrossReceived)],
     ['Commission earned', money(wallet.totalCommission)],
     ['Pending admin payouts', money(data.pendingPayouts)],
+    ['Ready for settlement', money(data.settlementReadyPayouts)],
     ['Users / providers', `${riderUsers} / ${adminUsers}`],
     ['Registered bikes', bikes.length],
     ['Bookings', bookings.length],
@@ -124,6 +122,11 @@ const renderDashboard = (data) => {
 };
 
 const loadDashboard = async () => {
+  if (isDashboardLoading || dashboard.hidden) {
+    return;
+  }
+
+  isDashboardLoading = true;
   dashboardError.textContent = '';
   try {
     const data = await request('/super-admin/dashboard');
@@ -134,6 +137,8 @@ const loadDashboard = async () => {
       sessionStorage.removeItem(tokenKey);
       showDashboard(false);
     }
+  } finally {
+    isDashboardLoading = false;
   }
 };
 
@@ -173,7 +178,7 @@ document.querySelector('#logout').addEventListener('click', () => {
 });
 
 settleButton.addEventListener('click', async () => {
-  if (!window.confirm('Record a demo settlement for all pending admin balances? No real money will be transferred.')) {
+  if (!window.confirm('Record a demo settlement for completed rides that are ready for payout? No real money will be transferred.')) {
     return;
   }
 
@@ -197,3 +202,15 @@ if (sessionStorage.getItem(tokenKey)) {
   showDashboard(true);
   loadDashboard();
 }
+
+window.addEventListener('focus', loadDashboard);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    loadDashboard();
+  }
+});
+window.setInterval(() => {
+  if (!document.hidden) {
+    loadDashboard();
+  }
+}, 15000);
