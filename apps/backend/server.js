@@ -10,13 +10,15 @@ const path = require('path');
 const dataStore = require('./dataStore');
 
 const app = express();
+const asyncHandler = (handler) => (req, res, next) =>
+  Promise.resolve(handler(req, res, next)).catch(next);
 
 const ADMIN_MOBILE =
-  process.env.ADMIN_LOGIN_MOBILE || '9986328111';
-const LEGACY_SUPER_ADMIN_MOBILE = '9999999999';
+  process.env.ADMIN_LOGIN_MOBILE || '8888888888';
+const ADMIN_LOGIN_PASSWORD = '00000000';
 const SUPER_ADMIN_ACCOUNTS = [
   // Development bootstrap account; production startup below rejects these credentials.
-  { mobile: '7777777777', password: '123456' },
+  { mobile: '9024280547', password: '00000000' },
 ];
 if (process.env.NODE_ENV === 'production') {
   throw new Error(
@@ -46,26 +48,19 @@ if (
 }
 const JWT_SECRET =
   configuredTokenSecret || 'bike-rental-local-secret';
-const bikes = dataStore.state.bikes;
-const bookings = dataStore.state.bookings;
-const payments = dataStore.state.payments;
-const users = dataStore.state.users;
-const wallets = dataStore.state.wallets;
-const settlementHistory = dataStore.state.settlements;
-const PASSWORD_MIN_LENGTH = 8;
+let bikes;
+let bookings;
+let payments;
+let users;
+let wallets;
+let settlementHistory;
+const PASSWORD_LENGTH = 8;
+const PASSWORD_REGEX = /^\d{8}$/;
 const BCRYPT_MAX_PASSWORD_BYTES = 72;
 const REGISTRATION_ROLES = ['USER', 'ADMIN'];
 
 const validatePassword = (password) => {
-  if (
-    typeof password !== 'string' ||
-    password.length < PASSWORD_MIN_LENGTH ||
-    Buffer.byteLength(password, 'utf8') > BCRYPT_MAX_PASSWORD_BYTES
-  ) {
-    return false;
-  }
-
-  return true;
+  return typeof password === 'string' && PASSWORD_REGEX.test(password);
 };
 
 const getPublicUser = (user) => {
@@ -144,17 +139,9 @@ const provisionPrivilegedAccount = async (
     throw new Error(`${role} login mobile must be a valid Indian mobile number`);
   }
 
-  const isBootstrapPassword =
-    role === 'SUPER_ADMIN' &&
-    SUPER_ADMIN_ACCOUNTS.some(
-      (account) =>
-        account.mobile === mobile &&
-        account.password === password
-    );
-
-  if (!validatePassword(password) && !isBootstrapPassword) {
+  if (!validatePassword(password)) {
     throw new Error(
-      `${role} password must be ${PASSWORD_MIN_LENGTH} to ${BCRYPT_MAX_PASSWORD_BYTES} UTF-8 bytes`
+      `${role} password must be exactly ${PASSWORD_LENGTH} numeric digits`
     );
   }
 
@@ -196,7 +183,7 @@ const provisionPrivilegedAccounts = async () => {
     provisionPrivilegedAccount(
       ADMIN_MOBILE,
       'ADMIN',
-      process.env.ADMIN_LOGIN_PASSWORD
+      ADMIN_LOGIN_PASSWORD
     ),
     ...SUPER_ADMIN_ACCOUNTS.map((account) =>
       provisionPrivilegedAccount(
@@ -207,21 +194,9 @@ const provisionPrivilegedAccounts = async () => {
     ),
   ]);
 
-  const legacySuperAdmin = users.find(
-    (user) => user.mobile === LEGACY_SUPER_ADMIN_MOBILE
-  );
-  const legacyAccountDemoted =
-    legacySuperAdmin?.role === 'SUPER_ADMIN' &&
-    !superAdminMobiles.includes(legacySuperAdmin.mobile);
-
-  if (legacyAccountDemoted) {
-    legacySuperAdmin.role = 'USER';
-    delete legacySuperAdmin.passwordHash;
-  }
-
-  if (accountResults.some(Boolean) || legacyAccountDemoted) {
+  if (accountResults.some(Boolean)) {
     wallets.superAdmin.mobile = SUPER_ADMIN_ACCOUNTS[0].mobile;
-    saveData();
+    await saveData();
   }
 };
 
@@ -242,9 +217,7 @@ const getAdminWallet = (mobile) => {
 const roundAmount = (amount) =>
   Math.round(amount * 100) / 100;
 
-const saveData = () => {
-  dataStore.saveState();
-};
+const saveData = () => dataStore.saveState();
 
 const getUserRole = (mobile) => {
   if (SUPER_ADMIN_ACCOUNTS.some((account) => account.mobile === mobile)) {
@@ -546,7 +519,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     if (!validatePassword(password)) {
       return res.status(400).json({
-        message: 'Password must be 8 to 72 UTF-8 bytes',
+        message: 'Password must be exactly 8 numeric digits',
       });
     }
 
@@ -585,7 +558,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (!existingUser) {
       users.push(user);
     }
-    saveData();
+    await saveData();
 
     const publicUser = getPublicUser(user);
     req.session.user = publicUser;
@@ -603,7 +576,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/admin/bikes', (req, res) => {
+app.post('/api/admin/bikes', asyncHandler(async (req, res) => {
   try {
 
     const {
@@ -650,7 +623,7 @@ app.post('/api/admin/bikes', (req, res) => {
 
     bikes.push(bike);
     getAdminWallet(adminMobile);
-    saveData();
+    await saveData();
 
     res.json({
       message: 'Bike Added Successfully',
@@ -662,7 +635,7 @@ app.post('/api/admin/bikes', (req, res) => {
       message: error.message,
     });
   }
-});
+}));
 app.get('/api/bikes', (req, res) => {
   res.json(
     bikes.map(getBikePublicData)
@@ -694,7 +667,7 @@ app.get(
   }
 );
 
-app.put('/api/admin/bikes/:id', (req, res) => {
+app.put('/api/admin/bikes/:id', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.params.id);
 
@@ -747,15 +720,15 @@ app.put('/api/admin/bikes/:id', (req, res) => {
   }
 
   bike.updatedAt = new Date();
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike updated successfully',
     bike: getBikePublicData(bike),
   });
-});
+}));
 
-app.patch('/api/admin/bikes/:id/status', (req, res) => {
+app.patch('/api/admin/bikes/:id/status', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.params.id);
   const status =
@@ -810,15 +783,15 @@ app.patch('/api/admin/bikes/:id/status', (req, res) => {
 
   bike.status = status;
   bike.updatedAt = new Date();
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike status updated successfully',
     bike: getBikePublicData(bike),
   });
-});
+}));
 
-app.delete('/api/admin/bikes/:id', (req, res) => {
+app.delete('/api/admin/bikes/:id', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.params.id);
 
@@ -859,13 +832,13 @@ app.delete('/api/admin/bikes/:id', (req, res) => {
   const [deletedBike] =
     bikes.splice(bikeIndex, 1);
 
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike deleted successfully',
     bike: deletedBike,
   });
-});
+}));
 
 app.get('/api/admin/bikes/:id/bookings', (req, res) => {
   const bikeId =
@@ -925,7 +898,19 @@ app.get(
     const totalEarnings =
       adminBookings.reduce(
         (sum, booking) =>
-          sum + booking.adminAmount,
+          sum + Number(booking.adminAmount || 0),
+        0
+      );
+    const totalGrossAmount =
+      adminBookings.reduce(
+        (sum, booking) =>
+          sum + Number(booking.grossAmount || 0),
+        0
+      );
+    const totalPlatformCommission =
+      adminBookings.reduce(
+        (sum, booking) =>
+          sum + Number(booking.superAdminCommission || 0),
         0
       );
 
@@ -959,11 +944,15 @@ app.get(
     res.json({
       wallet: getAdminWallet(mobile),
       totalEarnings: roundAmount(totalEarnings),
+      totalGrossAmount: roundAmount(totalGrossAmount),
+      totalPlatformCommission:
+        roundAmount(totalPlatformCommission),
+      commissionRate: SUPER_ADMIN_COMMISSION_RATE,
       pendingSettlementAmount:
         roundAmount(pendingSettlementAmount),
       settledAmount: roundAmount(settledAmount),
       bookings: adminBookings.map(
-        ({ superAdminCommission, userMobile, grossAmount, ...booking }) => booking
+        ({ userMobile, ...booking }) => booking
       ),
     });
   }
@@ -1037,7 +1026,7 @@ app.get('/api/super-admin/dashboard', (req, res) => {
   });
 });
 
-app.post('/api/super-admin/settle-weekly', (req, res) => {
+app.post('/api/super-admin/settle-weekly', asyncHandler(async (req, res) => {
   const pendingBookings =
     bookings.filter(
       booking =>
@@ -1110,7 +1099,7 @@ app.post('/api/super-admin/settle-weekly', (req, res) => {
     })
   );
   settlementHistory.push(...settlementRecords);
-  saveData();
+  await saveData();
 
   res.json({
     message:
@@ -1123,9 +1112,9 @@ app.post('/api/super-admin/settle-weekly', (req, res) => {
     adminWallets:
       Object.values(wallets.admins),
   });
-});
+}));
 
-app.post('/api/payments/mock', (req, res) => {
+app.post('/api/payments/mock', asyncHandler(async (req, res) => {
   const bikeId =
     Number(req.body.bikeId);
   const userMobile = req.user.mobile;
@@ -1171,7 +1160,7 @@ app.post('/api/payments/mock', (req, res) => {
   };
 
   payments.push(payment);
-  saveData();
+  await saveData();
 
   res.json({
     message:
@@ -1180,9 +1169,9 @@ app.post('/api/payments/mock', (req, res) => {
         : 'Mock payment failed',
     payment,
   });
-});
+}));
 
-app.post('/api/bookings', (req, res) => {
+app.post('/api/bookings', asyncHandler(async (req, res) => {
 
   const bikeId =
     Number(req.body.bikeId);
@@ -1305,13 +1294,13 @@ app.post('/api/bookings', (req, res) => {
   };
 
   bookings.push(booking);
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Bike booked successfully',
     booking: getUserBookingData(booking),
   });
-});
+}));
 
 app.get('/api/bookings/user/:mobile', (req, res) => {
   const mobile =
@@ -1352,7 +1341,7 @@ app.get('/api/bookings/user/:mobile', (req, res) => {
   res.json(userBookings);
 });
 
-app.post('/api/bookings/:id/start', (req, res) => {
+app.post('/api/bookings/:id/start', asyncHandler(async (req, res) => {
   const bookingId =
     Number(req.params.id);
 
@@ -1384,15 +1373,15 @@ app.post('/api/bookings/:id/start', (req, res) => {
   booking.status = 'ACTIVE';
   booking.tripStartTime = new Date();
 
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Trip started successfully',
     booking: getUserBookingData(booking),
   });
-});
+}));
 
-app.post('/api/bookings/:id/cancel', (req, res) => {
+app.post('/api/bookings/:id/cancel', asyncHandler(async (req, res) => {
   const bookingId =
     Number(req.params.id);
 
@@ -1444,7 +1433,7 @@ app.post('/api/bookings/:id/cancel', (req, res) => {
     bike.status = 'AVAILABLE';
   }
 
-  saveData();
+  await saveData();
 
   res.json({
     message:
@@ -1453,9 +1442,9 @@ app.post('/api/bookings/:id/cancel', (req, res) => {
     bike: bike ? getBikePublicData(bike) : null,
     payment,
   });
-});
+}));
 
-app.post('/api/bookings/:id/complete', (req, res) => {
+app.post('/api/bookings/:id/complete', asyncHandler(async (req, res) => {
   const bookingId =
     Number(req.params.id);
 
@@ -1556,7 +1545,7 @@ app.post('/api/bookings/:id/complete', (req, res) => {
     bike.status = 'AVAILABLE';
   }
 
-  saveData();
+  await saveData();
 
   res.json({
     message: 'Trip completed successfully',
@@ -1564,7 +1553,7 @@ app.post('/api/bookings/:id/complete', (req, res) => {
     updatedAmount: booking.grossAmount,
     bike: bike ? getBikePublicData(bike) : null,
   });
-});
+}));
 // PROTECTED ROUTE
 app.get('/api/profile', (req, res) => {
   res.json({
@@ -1576,9 +1565,30 @@ app.use('/super-admin', express.static(
   path.join(__dirname, '..', 'super-admin')
 ));
 
+app.use((error, _req, res, next) => {
+  console.error('Request failed:', error.message);
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  return res.status(500).json({
+    message: 'Unable to complete the request right now. Please try again.',
+  });
+});
+
 const port = process.env.PORT || 3002;
 
-provisionPrivilegedAccounts()
+dataStore.ready
+  .then(() => {
+    bikes = dataStore.state.bikes;
+    bookings = dataStore.state.bookings;
+    payments = dataStore.state.payments;
+    users = dataStore.state.users;
+    wallets = dataStore.state.wallets;
+    settlementHistory = dataStore.state.settlements;
+
+    return provisionPrivilegedAccounts();
+  })
   .then(() => {
     app.listen(port, '0.0.0.0', () => {
       console.log(
@@ -1588,7 +1598,7 @@ provisionPrivilegedAccounts()
   })
   .catch((error) => {
     console.error(
-      'Unable to provision privileged accounts:',
+      'Unable to initialize the backend:',
       error.message
     );
     process.exitCode = 1;

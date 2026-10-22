@@ -171,8 +171,8 @@ export default function App() {
       return;
     }
 
-    if (registrationPassword.length < 8) {
-      Alert.alert('Validation', 'Password must be at least 8 characters');
+    if (!/^\d{8}$/.test(registrationPassword)) {
+      Alert.alert('Validation', 'Password must be exactly 8 numeric digits');
       return;
     }
 
@@ -534,10 +534,16 @@ if (screen === 'AVAILABLE_BIKES') {
               ))}
             </View>
             <TextInput
-              placeholder="Create password (min 8 characters)"
+              placeholder="Create 8-digit numeric password"
               placeholderTextColor="#777"
               value={registrationPassword}
-              onChangeText={setRegistrationPassword}
+              onChangeText={(value) =>
+                setRegistrationPassword(
+                  value.replace(/\D/g, '').slice(0, 8)
+                )
+              }
+              keyboardType="number-pad"
+              maxLength={8}
               secureTextEntry
               autoCapitalize="none"
               editable={!loading}
@@ -550,10 +556,16 @@ if (screen === 'AVAILABLE_BIKES') {
               }}
             />
             <TextInput
-              placeholder="Confirm password"
+              placeholder="Confirm 8-digit numeric password"
               placeholderTextColor="#777"
               value={registrationPasswordConfirmation}
-              onChangeText={setRegistrationPasswordConfirmation}
+              onChangeText={(value) =>
+                setRegistrationPasswordConfirmation(
+                  value.replace(/\D/g, '').slice(0, 8)
+                )
+              }
+              keyboardType="number-pad"
+              maxLength={8}
               secureTextEntry
               autoCapitalize="none"
               editable={!loading}

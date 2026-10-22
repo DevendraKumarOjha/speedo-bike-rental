@@ -112,6 +112,15 @@ export default function AdminEarningsScreen({
         >
           Rs {summary?.pendingSettlementAmount || 0} pending weekly payout
         </Text>
+        <Text
+          style={{
+            color: '#D7D7D7',
+            marginTop: 6,
+          }}
+        >
+          Earnings shown below are after the{' '}
+          {Math.round((summary?.commissionRate || 0) * 100)}% platform fee.
+        </Text>
       </View>
 
       <View
@@ -123,7 +132,12 @@ export default function AdminEarningsScreen({
         }}
       >
         {[
-          ['Total earned', summary?.totalEarnings || 0],
+          ['Gross ride amount', summary?.totalGrossAmount || 0],
+          [
+            `Platform fee (${Math.round((summary?.commissionRate || 0) * 100)}%)`,
+            summary?.totalPlatformCommission || 0,
+          ],
+          ['Net earnings after fee', summary?.totalEarnings || 0],
           ['Pending payout', summary?.pendingSettlementAmount || 0],
           ['Settled', summary?.settledAmount || 0],
         ].map(([label, value]) => (
@@ -200,9 +214,12 @@ export default function AdminEarningsScreen({
             >
               {item.bikeName}
             </Text>
+            <Text>Ride amount: Rs {item.grossAmount || 0}</Text>
             <Text>
-              Admin Amount: Rs {item.adminAmount}
+              Platform fee ({Math.round((summary?.commissionRate || 0) * 100)}%): Rs{' '}
+              {item.superAdminCommission || 0}
             </Text>
+            <Text>Admin net amount: Rs {item.adminAmount || 0}</Text>
             <Text
               style={{
                 color:

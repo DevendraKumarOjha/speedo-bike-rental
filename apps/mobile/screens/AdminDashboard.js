@@ -132,7 +132,12 @@ export default function AdminDashboard({
         {[
           ['Total Bikes', bikeCount],
           ['Active Bikes', activeBikes],
-          ['Total Earnings', `Rs ${earnings?.totalEarnings || 0}`],
+          ['Gross Ride Amount', `Rs ${earnings?.totalGrossAmount || 0}`],
+          [
+            `Platform Fee (${Math.round((earnings?.commissionRate || 0) * 100)}%)`,
+            `Rs ${earnings?.totalPlatformCommission || 0}`,
+          ],
+          ['Net Earnings After Fee', `Rs ${earnings?.totalEarnings || 0}`],
           ['Payout Balance', `Rs ${earnings?.pendingSettlementAmount || 0}`],
           ['Wallet Balance', `Rs ${earnings?.wallet?.balance || 0}`],
         ].map(([label, value]) => (
@@ -186,7 +191,7 @@ export default function AdminDashboard({
             marginBottom: 8,
           }}
         >
-          Earnings Overview
+          Net Earnings After Platform Fee
         </Text>
         <Text
           style={{
