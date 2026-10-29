@@ -121,7 +121,10 @@ In another terminal:
 ```powershell
 Set-Location apps/mobile
 npm install
-npx expo start
+Copy-Item .env.development.local.example .env.development.local
+npx expo start --clear
 ```
 
-For local physical-device testing, set `EXPO_PUBLIC_API_URL` in `apps/mobile/.env` to the computer's Wi-Fi LAN address. The EAS preview build uses the deployed HTTPS address instead.
+Before starting Expo, edit `apps/mobile/.env.development.local` and replace `192.168.1.10` with your computer's Wi-Fi LAN IPv4 address. Keep the phone and computer on the same network, and make sure Windows Firewall allows the backend on port `3002`. For an Android emulator instead of a physical phone, use `http://10.0.2.2:3002/api`.
+
+The local override is ignored by Git and takes precedence over other `.env` files. The EAS preview and production profiles continue using `https://api.speedoryde.com/api`. This app uses Expo SDK 58; use the current Expo Go app from the Play Store.
