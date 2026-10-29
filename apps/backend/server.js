@@ -13,18 +13,19 @@ const app = express();
 const asyncHandler = (handler) => (req, res, next) =>
   Promise.resolve(handler(req, res, next)).catch(next);
 
+const isProduction = process.env.NODE_ENV === 'production';
 const ADMIN_MOBILE =
-  process.env.ADMIN_LOGIN_MOBILE || '8888888888';
-const ADMIN_LOGIN_PASSWORD = '00000000';
-const SUPER_ADMIN_ACCOUNTS = [
-  // Development bootstrap account; production startup below rejects these credentials.
-  { mobile: '9024280547', password: '00000000' },
-];
-if (process.env.NODE_ENV === 'production') {
-  throw new Error(
-    'Replace the hard-coded Super Admin bootstrap credentials before running in production'
-  );
-}
+  process.env.ADMIN_LOGIN_MOBILE || (isProduction ? '' : '8888888888');
+const ADMIN_LOGIN_PASSWORD =
+  process.env.ADMIN_LOGIN_PASSWORD || (isProduction ? '' : '00000000');
+const SUPER_ADMIN_ACCOUNTS = isProduction
+  ? [
+      {
+        mobile: process.env.SUPER_ADMIN_LOGIN_MOBILE || '',
+        password: process.env.SUPER_ADMIN_LOGIN_PASSWORD || '',
+      },
+    ]
+  : [{ mobile: '9024280547', password: '00000000' }];
 const SUPER_ADMIN_COMMISSION_RATE = Number(
   process.env.SUPER_ADMIN_COMMISSION_RATE || 0.10
 );
@@ -38,13 +39,61 @@ if (
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
 const configuredTokenSecret =
   process.env.JWT_SECRET || process.env.SESSION_SECRET;
-if (
-  process.env.NODE_ENV === 'production' &&
-  (!configuredTokenSecret ||
-    configuredTokenSecret === 'replace-this-for-production' ||
-    configuredTokenSecret === 'replace-with-a-long-random-secret')
-) {
-  throw new Error('Configure a unique JWT_SECRET before running in production');
+const PASSWORD_LENGTH = 8;
+const PASSWORD_REGEX = /^\d{8}$/;
+const validatePassword = (password) => {
+  return typeof password === 'string' && PASSWORD_REGEX.test(password);
+};
+
+if (isProduction) {
+  const missingCredentials = [
+    ['ADMIN_LOGIN_MOBILE', ADMIN_MOBILE],
+    ['ADMIN_LOGIN_PASSWORD', ADMIN_LOGIN_PASSWORD],
+    ['SUPER_ADMIN_LOGIN_MOBILE', SUPER_ADMIN_ACCOUNTS[0].mobile],
+    ['SUPER_ADMIN_LOGIN_PASSWORD', SUPER_ADMIN_ACCOUNTS[0].password],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+
+  if (missingCredentials.length > 0) {
+    throw new Error(
+      `Configure production privileged credentials: ${missingCredentials.join(', ')}`
+    );
+  }
+
+  if (
+    !process.env.JWT_SECRET ||
+    process.env.JWT_SECRET.length < 32 ||
+    process.env.JWT_SECRET === 'replace-with-a-long-random-secret'
+  ) {
+    throw new Error('Configure a unique JWT_SECRET of at least 32 characters');
+  }
+
+  if (
+    !process.env.SESSION_SECRET ||
+    process.env.SESSION_SECRET.length < 32 ||
+    process.env.SESSION_SECRET === 'replace-this-for-production'
+  ) {
+    throw new Error('Configure a unique SESSION_SECRET of at least 32 characters');
+  }
+
+  if (
+    !INDIAN_MOBILE_REGEX.test(ADMIN_MOBILE) ||
+    !INDIAN_MOBILE_REGEX.test(SUPER_ADMIN_ACCOUNTS[0].mobile)
+  ) {
+    throw new Error('Configure valid Indian mobile numbers for privileged accounts');
+  }
+
+  if (
+    !validatePassword(ADMIN_LOGIN_PASSWORD) ||
+    !validatePassword(SUPER_ADMIN_ACCOUNTS[0].password) ||
+    ADMIN_LOGIN_PASSWORD === '00000000' ||
+    SUPER_ADMIN_ACCOUNTS[0].password === '00000000'
+  ) {
+    throw new Error(
+      'Production privileged account passwords must be different from the default and exactly eight numeric digits'
+    );
+  }
 }
 const JWT_SECRET =
   configuredTokenSecret || 'bike-rental-local-secret';
@@ -54,14 +103,8 @@ let payments;
 let users;
 let wallets;
 let settlementHistory;
-const PASSWORD_LENGTH = 8;
-const PASSWORD_REGEX = /^\d{8}$/;
 const BCRYPT_MAX_PASSWORD_BYTES = 72;
 const REGISTRATION_ROLES = ['USER', 'ADMIN'];
-
-const validatePassword = (password) => {
-  return typeof password === 'string' && PASSWORD_REGEX.test(password);
-};
 
 const getPublicUser = (user) => {
   const { passwordHash, ...publicUser } = user;
@@ -452,13 +495,19 @@ app.get('/', (req, res) => {
     message: 'Bike Rental API Running',
   });
 });
-app.get('/api/test', (req, res) => {
+
+const sendHealthCheck = (_req, res) => {
   res.json({
     success: true,
-    message: 'Backend reachable',
-    authentication: 'password',
+    status: 'ok',
+    service: 'bike-rental-api',
+    database: 'connected',
   });
-});
+};
+
+app.get('/health', sendHealthCheck);
+app.get('/api/health', sendHealthCheck);
+app.get('/api/test', sendHealthCheck);
 
 const otpDisabled = (_req, res) =>
   res.status(410).json({

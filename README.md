@@ -1,86 +1,127 @@
-# Bike Rental – React Native app
+# Bike Rental – Hostycare and Android test deployment
 
-This delivery contains the Expo React Native rider/provider application, a separate browser-based Super Admin portal, and the shared Node.js API backend.
+The project has three parts:
 
-## Requirements
-- Node.js LTS (18 or newer)
-- Android Studio + Android emulator, or Expo Go on a phone
-- For iOS builds, macOS + Xcode
+- Android/iOS mobile app: Expo React Native in `apps/mobile`
+- API: Node.js and Express in `apps/backend`
+- Database: MySQL
 
-## 1. Install dependencies
+This guide prepares a closed Android test build for you and a few friends. The API domain configured for the app is `https://api.speedoryde.com`. The API must be deployed and reachable before building/installing an APK.
 
-From this folder:
+## Current deployment status
 
-```bash
-npm run install:all
+The API hostname resolves, but `https://api.speedoryde.com/api/test` currently returns Hostycare/LiteSpeed's HTML 404 page. This means the Node.js app is not yet attached to that subdomain or is not running. Do not build/share an APK until that URL returns the API JSON health response.
+
+## 1. Connect the MySQL database you created
+
+In cPanel, open **MySQL Databases** (or **MySQL Database Wizard**) and:
+
+The database and user have already been created and assigned. The values provided so far are:
+
+```env
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=speedory_root
+MYSQL_DATABASE=speedory_speedo-bike-rental
 ```
 
-## 2. Start the backend
+In **MySQL Databases**, confirm `speedory_root` is assigned to `speedory_speedo-bike-rental` with **All Privileges**. If the cPanel screen shows a prefixed or different username, use the exact displayed username instead.
 
-Open terminal 1:
+Do not send the database password to anyone or commit it to Git.
 
-```bash
-cd apps/backend
-copy .env.example .env
-npm install
-npm start
+## 2. Configure the Node.js app and API subdomain
+
+In cPanel **Setup Node.js App** (the exact label may vary):
+
+1. Create an application and select a supported Node.js version (use Node 20 or newer if offered).
+2. Map the application to `api.speedoryde.com` and enable/issue its SSL certificate.
+3. Upload the `apps/backend` and `apps/super-admin` folders to the server, preserving them as siblings. Set the application root to the `apps/backend` directory (the directory containing `server.js` and `package.json`); the sibling `apps/super-admin` directory is required for the Super Admin portal.
+4. Set the startup file to `server.js`. Install the backend dependencies (`npm install` in the backend directory, or use cPanel's Run NPM Install action).
+5. Add the environment variables listed below in cPanel. Set `PORT` to the port cPanel assigns, if it requires one.
+6. Restart the application after saving the environment variables.
+
+The backend creates the MySQL tables on first startup. Keep the database credentials and secrets in cPanel's environment-variable settings or the server's private `.env`; do not commit a real `.env` file.
+
+### Backend environment variables
+
+Use the names below, replacing every placeholder with the values from your Hostycare account. `MYSQL_HOST`, database name, and database user must match cPanel exactly. Set the password and secrets directly in cPanel; don't paste them into chat or source control.
+
+```env
+PORT=the_port_assigned_by_hostycare
+NODE_ENV=production
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=speedory_root
+MYSQL_PASSWORD=set_this_privately_in_cpanel
+MYSQL_DATABASE=speedory_speedo-bike-rental
+APP_IMPORT_LEGACY_DATA=false
+SESSION_SECRET=a_unique_random_secret_of_at_least_32_characters
+JWT_SECRET=a_different_unique_random_secret_of_at_least_32_characters
+SUPER_ADMIN_COMMISSION_RATE=0.10
+ADMIN_LOGIN_MOBILE=your_10_digit_admin_mobile
+ADMIN_LOGIN_PASSWORD=your_unique_8_digit_admin_password
+SUPER_ADMIN_LOGIN_MOBILE=your_10_digit_super_admin_mobile
+SUPER_ADMIN_LOGIN_PASSWORD=a_different_unique_8_digit_password
 ```
 
-Create the MySQL database before starting the backend:
+The app validates privileged phone numbers and requires each privileged password to be exactly eight digits. Production also rejects the default demo password `00000000`. Choose credentials you control and do not reuse personal banking or email passwords. Generate two separate random secrets locally, for example in PowerShell:
 
-```sql
-CREATE DATABASE speedo_bike_rental CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```powershell
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-Set `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE` in `apps/backend/.env` to match your MySQL server. The configured MySQL user needs permission to create and modify tables in that database. The API creates its tables automatically and listens on port `3002` on all network interfaces. Authentication currently uses mobile number and password only; OTP is temporarily disabled.
+Use one output for `SESSION_SECRET`, the other for `JWT_SECRET`. Do not share or commit them.
 
-To move legacy JSON data into MySQL, set `APP_DATA_FILE` to the existing JSON file's path and `APP_IMPORT_LEGACY_DATA=true` for the first backend startup. Keep the source outside the app directory. The import runs only if the MySQL tables do not already contain app data. After verifying the migration, set the flag back to `false` and remove the source file if it is no longer needed. The backend does not write app data to files.
+### Verify the API deployment
 
-## 3. Start the React Native app
+Open either `https://api.speedoryde.com/api/test` or `https://api.speedoryde.com/api/health` in a browser. These public test endpoints return success only after the backend has initialized its MySQL connection. A healthy response looks like:
 
-Open terminal 2 at the project root:
+```json
+{"success":true,"status":"ok","service":"bike-rental-api","database":"connected"}
+```
 
-```bash
-cd apps/mobile
+If it still shows a LiteSpeed 404, check the cPanel application root, startup file, domain mapping, app logs, and restart status with Hostycare support. If the Node.js app reports a MySQL connection error, verify the database username/password, database name, host, and that the user has **All Privileges** on this database.
+
+## 3. Build the Android APK
+
+The Expo EAS `preview` profile builds an installable APK and embeds `https://api.speedoryde.com/api` as the API URL. Build only after the API health check above succeeds.
+
+From PowerShell at the repository root:
+
+```powershell
+Set-Location apps/mobile
+npx expo config --type public
+npx eas login
+npx eas whoami
+npx eas build --platform android --profile preview
+```
+
+The Expo account must have access to the EAS project configured in `apps/mobile/app.json`. If `eas whoami` shows an account without access, ask the project owner to grant access or coordinate linking a project to your own Expo account before building. Never share your Expo password or access token.
+
+When EAS finishes, use its build page/link to download the APK, install it on your Android phone, and share the APK with your testers. Android may ask each tester to allow installation from that download source.
+
+## 4. Closed-test limitations
+
+- Payments and weekly settlements are demo/mock records; no real money is processed.
+- OTP/mobile ownership verification is disabled. Only use accounts and phone numbers belonging to your test group.
+- This is a closed-test setup, not a public launch configuration. Do not collect real payments or expose the demo privileged accounts publicly.
+- Android APK builds are for Android devices. iOS requires a separate iOS build and Apple signing/distribution setup.
+
+## Local development
+
+For local development, create `apps/backend/.env` from `.env.example` with local MySQL details, then run:
+
+```powershell
+npm --prefix apps/backend start
+```
+
+In another terminal:
+
+```powershell
+Set-Location apps/mobile
 npm install
 npx expo start
 ```
 
-Press `a` for Android emulator or scan the QR code with Expo Go. You can also run `npm run android` from `apps/mobile`.
-
-## API address configuration
-
-- During Expo development, the app uses the host address from the Expo dev server automatically.
-- If automatic detection is unavailable or you are using an Expo tunnel, create `apps/mobile/.env` and set your computer's Wi-Fi LAN IP (not `localhost` or `127.0.0.1`):
-
-```env
-EXPO_PUBLIC_API_URL=http://192.168.1.10:3002/api
-```
-
-Replace `192.168.1.10` with your computer's LAN IP. Make sure the phone and computer are on the same Wi-Fi and Windows Firewall allows Node.js on port 3002. Restart Expo after changing `.env`.
-
-## Main mobile features
-
-- Mobile-number/password login and registration with saved login session
-- Rider and bike-provider role-based screens in the mobile app
-- Separate Super Admin portal at `http://localhost:3002/super-admin`
-- Browse/filter available bikes
-- Bike registration and admin bike management
-- Booking, mock payment and booking confirmation
-- User booking history and admin earnings
-
-## Important notes
-
-- Start the backend, then open `http://localhost:3002/super-admin` in a browser to access the separate portal. For local testing, sign in with username/mobile `9024280547` and password `00000000`. If you changed `PORT` in `apps/backend/.env`, use that port in the URL instead.
-- The mobile app and Super Admin portal both use mobile number as username and password authentication. Rider and provider registration are available from the mobile login screen; OTP is temporarily disabled.
-- Payment is a mock/demo flow; do not use it to collect real payments.
-- The testing admin account is `8888888888` / `00000000`; the testing Super Admin account is `9024280547` / `00000000`. Backend startup updates these privileged account password hashes in MySQL. New user/admin registrations and privileged account passwords must be exactly eight numeric digits. Existing rider passwords are unchanged so those account holders can continue signing in. These weak credentials and password rules are for local testing only; restore stronger credentials and password policy before production use. The backend refuses to start in production with the development Super Admin bootstrap credentials.
-- New rider and provider accounts can register with a mobile number and password. After registration, providers can add bikes and riders can book available bikes. Super Admin accounts are provisioned by the backend and sign in only through the separate portal. Existing passwordless accounts can complete registration again using the same mobile number and their existing account type to set a password.
-- OTP sign-in and verification endpoints are temporarily disabled and return HTTP `410 Gone`. Because registration currently does not verify mobile ownership, use this password-only mode for local testing only; restore SMS verification before public launch.
-- The rider/provider app sends requests with short-lived signed tokens. API permissions enforce that riders see their own bookings, providers manage their own bikes and earnings without platform commission details, and Super Admin-only endpoints expose platform-wide data.
-- Set `JWT_SECRET` to a long random value in the private backend `.env`. `SUPER_ADMIN_COMMISSION_RATE` is a decimal fraction and defaults to `0.10` (10%).
-- Ride earnings are recorded as gross ride amount, platform commission, and admin net (`gross - commission`). Weekly settlement pays the admin net only; the admin dashboard and earnings screen show the breakdown to make the fee clear.
-- Rider payments and weekly provider settlements are demo ledger records only. The Super Admin portal shows those records and can record completed rides for weekly payouts, but it does not transfer money; integrate and verify a payment provider before handling real payments.
-- MySQL is the sole runtime store for accounts, bikes, bookings, payments, settlements, and wallet balances. Tables use role-oriented names: `user_accounts`, `user_profiles`, `user_bookings`, `user_payments`, `admin_accounts`, `admin_bikes`, `admin_settlements`, `admin_wallets`, `super_admin_accounts`, `super_admin_wallets`, and `super_admin_settings`. On startup, legacy `app_*` tables are copied to the named tables and removed only after the copied row counts are verified; an existing `users` profile table is renamed to `user_profiles`. A legacy JSON file is only read during the explicitly enabled one-time import described above.
-- The original backend `.env` file is intentionally not included because environment files can contain private credentials. Use `.env.example` as a starting point.
-- This is an Expo React Native project (native Android/iOS UI), not a WebView wrapper.
+For local physical-device testing, set `EXPO_PUBLIC_API_URL` in `apps/mobile/.env` to the computer's Wi-Fi LAN address. The EAS preview build uses the deployed HTTPS address instead.
