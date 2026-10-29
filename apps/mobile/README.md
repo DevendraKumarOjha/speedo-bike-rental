@@ -1,50 +1,22 @@
-# Welcome to your Expo app 👋
+# Bike Rental Mobile App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The Expo app is configured to call `https://api.speedoryde.com/api` and the EAS `preview` profile produces an Android APK for closed testing.
 
-## Get started
+## Build an APK
 
-1. Install dependencies
+Build only after the backend health endpoint at `https://api.speedoryde.com/api/test` returns JSON successfully.
 
-   ```bash
-   npm install
-   ```
+From this directory:
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```powershell
+npx expo config --type public
+npx eas login
+npx eas whoami
+npx eas build --platform android --profile preview
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+The signed-in Expo account must have access to the project configured in `app.json`. EAS provides an APK download link when the build completes.
 
-## Learn more
+To override the API URL for a build, set `EXPO_PUBLIC_API_URL` in the build environment. Do not use `localhost` in an APK shared with testers.
 
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+This is a closed-test app: payments are mocked and OTP verification is disabled. Do not use it to collect real payments or expose demo credentials publicly.

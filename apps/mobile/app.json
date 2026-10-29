@@ -22,7 +22,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "usesCleartextTraffic": true,
-      "package": "com.lokendraojha.bikerental"
+      "package": "com.speedoryde.bikerental"
     },
     "web": {
       "output": "single",
