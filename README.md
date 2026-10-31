@@ -8,9 +8,9 @@ The project has three parts:
 
 This guide prepares a closed Android test build for you and a few friends. The API domain configured for the app is `https://api.speedoryde.com`. The API must be deployed and reachable before building/installing an APK.
 
-## Current deployment status
+## Production API readiness
 
-The API hostname resolves, but `https://api.speedoryde.com/api/test` currently returns Hostycare/LiteSpeed's HTML 404 page. This means the Node.js app is not yet attached to that subdomain or is not running. Do not build/share an APK until that URL returns the API JSON health response.
+Before building or sharing an APK, verify that `https://api.speedoryde.com/api/test` returns the API JSON health response. A Hostycare/LiteSpeed 404 means the Node.js app is not attached to the subdomain or is not running. An Imunify360 bot-protection response means the hosting firewall is blocking API traffic; ask the hosting provider to allow legitimate mobile API requests rather than weakening client-side checks.
 
 ## 1. Connect the MySQL database you created
 
@@ -110,10 +110,16 @@ When EAS finishes, use its build page/link to download the APK, install it on yo
 
 ## Local development
 
-For local development, create `apps/backend/.env` from `.env.example` with local MySQL details, then run:
+For local development, create `apps/backend/.env` from `.env.example` with local MySQL details. Start the backend from the repository root with:
 
 ```powershell
 npm --prefix apps/backend start
+```
+
+If your terminal is already in `apps/backend`, run:
+
+```powershell
+npm start
 ```
 
 In another terminal:
@@ -125,6 +131,6 @@ Copy-Item .env.development.local.example .env.development.local
 npx expo start --clear
 ```
 
-Before starting Expo, edit `apps/mobile/.env.development.local` and replace `192.168.1.10` with your computer's Wi-Fi LAN IPv4 address. Keep the phone and computer on the same network, and make sure Windows Firewall allows the backend on port `3002`. For an Android emulator instead of a physical phone, use `http://10.0.2.2:3002/api`.
+Expo Go automatically uses the current Metro host as the local API host, so leave `EXPO_PUBLIC_API_URL` unset for normal local testing. `localhost` on a physical phone refers to the phone, not your computer. Keep both devices on the same Wi-Fi network, and make sure Windows Firewall allows backend port `3002`. Expo Go adapts automatically when the computer's LAN IP changes. For an Android emulator, use `http://10.0.2.2:3002/api`.
 
 The local override is ignored by Git and takes precedence over other `.env` files. The EAS preview and production profiles continue using `https://api.speedoryde.com/api`. This app uses Expo SDK 58; use the current Expo Go app from the Play Store.

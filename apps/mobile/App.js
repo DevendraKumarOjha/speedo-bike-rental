@@ -153,6 +153,19 @@ export default function App() {
       });
       await completeLogin(response.data.user, response.data.token);
     } catch (error) {
+      if (__DEV__) {
+        console.error('[LOGIN API ERROR]', {
+          code: error?.code,
+          message: error?.message,
+          method: error?.config?.method,
+          url: error?.config ? api.getUri(error.config) : null,
+          status: error?.response?.status,
+          requestStatus: error?.request?.status,
+          requestUrl: error?.request?.responseURL,
+          readyState: error?.request?.readyState,
+        });
+      }
+
       Alert.alert(
         'Login failed',
         getFriendlyErrorMessage(

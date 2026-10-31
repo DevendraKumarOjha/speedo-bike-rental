@@ -474,6 +474,15 @@ app.use(cors());
 
 app.use(express.json());
 
+if (!isProduction) {
+  app.use('/api', (req, res, next) => {
+    res.on('finish', () => {
+      console.info(`[API] ${req.method} ${req.path} -> ${res.statusCode}`);
+    });
+    next();
+  });
+}
+
 app.use('/api/admin', authenticate, requireRole('ADMIN'));
 app.use('/api/super-admin', authenticate, requireRole('SUPER_ADMIN'));
 app.use('/api/payments', authenticate, requireRole('USER'));

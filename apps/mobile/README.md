@@ -23,13 +23,15 @@ To override the API URL for a build, set `EXPO_PUBLIC_API_URL` in the build envi
 
 This project uses Expo SDK 58, so update Expo Go from the Play Store before testing.
 
-From this directory, copy the local environment template and replace its example IP with your computer's Wi-Fi LAN IPv4 address:
+From this directory, copy the local environment template:
 
 ```powershell
 Copy-Item .env.development.local.example .env.development.local
 npx expo start --clear
 ```
 
-Keep the phone and computer on the same Wi-Fi network. The local backend must be running and reachable on port `3002`; allow it through Windows Firewall if needed. For an Android emulator, set `EXPO_PUBLIC_API_URL=http://10.0.2.2:3002/api` in `.env.development.local` instead. This ignored local file overrides the production URL; EAS profiles remain configured to use the hosted API.
+Expo Go uses the current computer running Expo as the local API host by default, using the Metro connection address; you should not need to edit an IP when it changes. `localhost` cannot be used from Expo Go on a physical phone because it refers to the phone itself. Keep the phone and computer on the same Wi-Fi network. The local backend must be running and reachable on port `3002`; allow it through Windows Firewall if needed. For an Android emulator, use `http://10.0.2.2:3002/api` as a manual override instead. This ignored local file overrides the production URL; EAS profiles remain configured to use the hosted API.
+
+If you see an Imunify360 bot-protection response, the request reached the hosting firewall rather than the app's login handler. Use the local backend for development. For production, ask your hosting provider to allow legitimate mobile API requests; changing the app cannot override the server firewall.
 
 This is a closed-test app: payments are mocked and OTP verification is disabled. Do not use it to collect real payments or expose demo credentials publicly.
