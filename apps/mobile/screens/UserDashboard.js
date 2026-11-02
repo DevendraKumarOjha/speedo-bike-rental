@@ -305,7 +305,10 @@ export default function UserDashboard({
             fontSize: 16,
           }}
         >
-          {topBike?.hotelName || 'The Royal Palace Hotel'}
+          {topBike?.hotelName ||
+            (location?.city
+              ? 'No bikes available in this city yet'
+              : 'Your city could not be identified')}
         </Text>
         <Text
           style={{
@@ -313,7 +316,9 @@ export default function UserDashboard({
             marginTop: 6,
           }}
         >
-          4.5 rating | {availableCount} bikes available
+          {topBike
+            ? `${topBike.rating || 4.5} rating | ${availableCount} bikes available`
+            : `${availableCount} bikes available`}
         </Text>
       </TouchableOpacity>
 

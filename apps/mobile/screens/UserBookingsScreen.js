@@ -10,7 +10,10 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Linking,
+  Platform,
 } from 'react-native';
+import * as Location from 'expo-location';
 
 import api from '../services/api';
 import getFriendlyErrorMessage from '../utils/getFriendlyErrorMessage';
@@ -32,6 +35,7 @@ const formatDateTime = (value) => {
 
 export default function UserBookingsScreen({
   userMobile,
+  onTrackingBookingChange,
   onBack,
 }) {
 
@@ -78,15 +82,26 @@ export default function UserBookingsScreen({
     async (
       bookingId,
       endpoint,
-      fallbackMessage
+      fallbackMessage,
+      body = {}
     ) => {
       try {
         setActionLoading(true);
 
         const response =
           await api.post(
-            `/bookings/${bookingId}/${endpoint}`
+            `/bookings/${bookingId}/${endpoint}`,
+            body
           );
+
+        if (endpoint === 'start') {
+          onTrackingBookingChange?.(response.data.booking);
+        } else if (
+          endpoint === 'complete' ||
+          endpoint === 'location/stop'
+        ) {
+          onTrackingBookingChange?.(null);
+        }
 
         Alert.alert(
           'Success',
@@ -106,6 +121,102 @@ export default function UserBookingsScreen({
         setActionLoading(false);
       }
     };
+
+  const startTrip = (bookingId, shareLocation) =>
+    runBookingAction(
+      bookingId,
+      'start',
+      'Unable to start trip',
+      { shareLocation }
+    );
+
+  const confirmStartTrip = (bookingId) => {
+    Alert.alert(
+      'Share your live location?',
+      'If you agree, the admin responsible for this booked bike can see your current location only during this active trip and while the app is open. Location sharing stops when the trip ends, and you can stop sharing at any time.',
+      [
+        {
+          text: 'Start without sharing',
+          onPress: () => startTrip(bookingId, false),
+        },
+        {
+          text: 'Share & Start Trip',
+          onPress: async () => {
+            try {
+              let permission =
+                await Location.getForegroundPermissionsAsync();
+              if (!permission.granted && permission.canAskAgain) {
+                permission =
+                  await Location.requestForegroundPermissionsAsync();
+              }
+
+              if (!permission.granted) {
+                Alert.alert(
+                  'Location permission required',
+                  'Allow location access to share your live location, or choose “Start without sharing”.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Open settings',
+                      onPress: () => Linking.openSettings(),
+                    },
+                  ]
+                );
+                return;
+              }
+
+              if (!(await Location.hasServicesEnabledAsync())) {
+                Alert.alert(
+                  'Enable phone location',
+                  'Turn on Location/GPS in your phone settings, then try again.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Open settings',
+                      onPress: () =>
+                        Platform.OS === 'android'
+                          ? Linking.sendIntent(
+                              'android.settings.LOCATION_SOURCE_SETTINGS'
+                            )
+                          : Linking.openSettings(),
+                    },
+                  ]
+                );
+                return;
+              }
+
+              startTrip(bookingId, true);
+            } catch (error) {
+              Alert.alert(
+                'Unable to check location',
+                error.message || 'Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmStopSharing = (bookingId) => {
+    Alert.alert(
+      'Stop location sharing?',
+      'The bike admin will no longer be able to see your current location.',
+      [
+        { text: 'Keep sharing', style: 'cancel' },
+        {
+          text: 'Stop sharing',
+          style: 'destructive',
+          onPress: () =>
+            runBookingAction(
+              bookingId,
+              'location/stop',
+              'Unable to stop location sharing'
+            ),
+        },
+      ]
+    );
+  };
 
   const confirmCancel =
     (bookingId) => {
@@ -321,13 +432,7 @@ export default function UserBookingsScreen({
               >
                 <TouchableOpacity
                   disabled={actionLoading}
-                  onPress={() =>
-                    runBookingAction(
-                      item.id,
-                      'start',
-                      'Unable to start trip'
-                    )
-                  }
+                  onPress={() => confirmStartTrip(item.id)}
                   style={{
                     flex: 1,
                     backgroundColor: '#22C55E',
@@ -372,6 +477,39 @@ export default function UserBookingsScreen({
             )}
 
             {item.status === 'ACTIVE' && (
+              <>
+              {item.locationSharingEnabled ? (
+                <View
+                  style={{
+                    backgroundColor: '#ECFDF3',
+                    borderRadius: 12,
+                    marginTop: 14,
+                    padding: 12,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: '#166534',
+                      fontWeight: '800',
+                    }}
+                  >
+                    Live location sharing is on while this app is open.
+                  </Text>
+                  <TouchableOpacity
+                    disabled={actionLoading}
+                    onPress={() => confirmStopSharing(item.id)}
+                    style={{
+                      alignSelf: 'flex-start',
+                      marginTop: 8,
+                      paddingVertical: 6,
+                    }}
+                  >
+                    <Text style={{ color: '#B91C1C', fontWeight: '900' }}>
+                      Stop sharing
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
               <TouchableOpacity
                 disabled={actionLoading}
                 onPress={() =>
@@ -398,6 +536,7 @@ export default function UserBookingsScreen({
                   End Trip
                 </Text>
               </TouchableOpacity>
+              </>
             )}
           </View>
         )}

@@ -1,6 +1,7 @@
 import React,
 {
   useEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -14,6 +15,8 @@ import {
   Alert,
   Image,
   ScrollView,
+  AppState,
+  Linking,
 } from 'react-native';
 
 import {
@@ -33,6 +36,7 @@ const statusColor = {
 
 export default function MyBikesScreen({
   adminMobile,
+  bookedOnly = false,
   onBack,
 }) {
 
@@ -42,6 +46,12 @@ export default function MyBikesScreen({
     useState(null);
   const [bikeBookings, setBikeBookings] =
     useState([]);
+  const bikeBookingsRef = useRef(bikeBookings);
+  bikeBookingsRef.current = bikeBookings;
+  const [bookingLocations, setBookingLocations] =
+    useState({});
+  const [locationError, setLocationError] =
+    useState('');
   const [form, setForm] =
     useState({});
 
@@ -49,6 +59,14 @@ export default function MyBikesScreen({
     useState(true);
   const [saving, setSaving] =
     useState(false);
+  const selectedBikeId = selectedBike?.id;
+  const selectedBikeIsReadOnly =
+    bookedOnly ||
+    selectedBike?.status === 'BOOKED' ||
+    bikeBookings.some(
+      (booking) =>
+        ['UPCOMING', 'ACTIVE'].includes(booking.status)
+    );
 
   useEffect(() => {
     loadBikes();
@@ -79,6 +97,8 @@ export default function MyBikesScreen({
   const selectBike =
     async (bike) => {
       setSelectedBike(bike);
+      setBikeBookings([]);
+      setBookingLocations({});
       setForm({
         bikeName: bike.bikeName,
         bikeNumber: bike.bikeNumber,
@@ -102,6 +122,125 @@ export default function MyBikesScreen({
         setBikeBookings([]);
       }
     };
+
+  useEffect(() => {
+    if (!selectedBikeId) {
+      setBookingLocations({});
+      setLocationError('');
+      return undefined;
+    }
+
+    let active = true;
+    const loadLocations = async () => {
+      const sharedBookings = bikeBookingsRef.current.filter(
+        (booking) =>
+          booking.status === 'ACTIVE' &&
+          booking.locationSharingEnabled === true
+      );
+
+      if (sharedBookings.length === 0) {
+        setBookingLocations({});
+        setLocationError('');
+        return;
+      }
+
+      const results = await Promise.all(
+        sharedBookings.map(async (booking) => {
+          try {
+            const response = await api.get(
+              `/admin/bikes/${selectedBikeId}/bookings/${booking.id}/location`
+            );
+            return [booking.id, response.data];
+          } catch (error) {
+            console.error('[BIKE LOCATION ERROR]', error);
+            return [booking.id, null];
+          }
+        })
+      );
+
+      if (active) {
+        setBookingLocations(Object.fromEntries(results));
+        setLocationError(
+          results.some(([, result]) => result === null)
+            ? 'Some live locations could not be refreshed.'
+            : ''
+        );
+      }
+    };
+
+    const refreshIfForeground = () => {
+      if (AppState.currentState === 'active') {
+        loadLocations();
+      }
+    };
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      (state) => {
+        if (state === 'active') {
+          loadLocations();
+        }
+      }
+    );
+    refreshIfForeground();
+    const interval = setInterval(refreshIfForeground, 10000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      appStateSubscription.remove();
+    };
+  }, [selectedBikeId]);
+
+  useEffect(() => {
+    if (!selectedBikeId) {
+      return undefined;
+    }
+
+    let active = true;
+    const refreshBookings = async () => {
+      try {
+        const response = await api.get(
+          `/admin/bikes/${selectedBikeId}/bookings`
+        );
+        if (active) {
+          setBikeBookings(response.data);
+        }
+      } catch (error) {
+        console.error('[BIKE BOOKINGS REFRESH ERROR]', error.message);
+      }
+    };
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      (state) => {
+        if (state === 'active') {
+          refreshBookings();
+        }
+      }
+    );
+    const interval = setInterval(() => {
+      if (AppState.currentState === 'active') {
+        refreshBookings();
+      }
+    }, 10000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      appStateSubscription.remove();
+    };
+  }, [selectedBikeId]);
+
+  const openLocationOnMap = async (location) => {
+    const url = `https://www.google.com/maps/search/?api=1&query=${location.latitude},${location.longitude}`;
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert(
+        'Unable to open map',
+        error.message || 'Could not open the map for this location.'
+      );
+    }
+  };
 
   const updateForm =
     (key, value) => {
@@ -264,7 +403,7 @@ export default function MyBikesScreen({
             marginBottom: 16,
           }}
         >
-          Manage Bike
+          {selectedBikeIsReadOnly ? 'Booked Bike Details' : 'Manage Bike'}
         </Text>
 
         {form.imageUrl ? (
@@ -310,6 +449,7 @@ export default function MyBikesScreen({
             key={key}
             placeholder={label}
             value={form[key]}
+            editable={!selectedBikeIsReadOnly}
             onChangeText={(value) =>
               updateForm(key, value)
             }
@@ -330,66 +470,65 @@ export default function MyBikesScreen({
           />
         ))}
 
-        <TouchableOpacity
-          onPress={saveBike}
-          disabled={saving}
-          style={{
-            backgroundColor: '#22C55E',
-            padding: 16,
-            borderRadius: 16,
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-        >
-          <Text
-            style={{
-              color: '#FFFFFF',
-              fontWeight: '900',
-            }}
-          >
-            {saving ? 'Saving...' : 'Save Changes'}
-          </Text>
-        </TouchableOpacity>
-
-        <View
-          style={{
-            flexDirection: 'row',
-            gap: 8,
-            marginBottom: 12,
-          }}
-        >
-          {['AVAILABLE', 'MAINTENANCE', 'UNAVAILABLE'].map((status) => (
+        {!selectedBikeIsReadOnly && (
+          <>
             <TouchableOpacity
-              key={status}
-              onPress={() =>
-                changeStatus(status)
-              }
+              onPress={saveBike}
+              disabled={saving}
               style={{
-                flex: 1,
-                backgroundColor:
-                  status === 'AVAILABLE'
-                    ? '#DCFCE7'
-                    : '#FFFFFF',
-                borderRadius: 12,
-                padding: 12,
-                borderColor: '#ECECEC',
-                borderWidth: 1,
+                backgroundColor: '#22C55E',
+                padding: 16,
+                borderRadius: 16,
+                alignItems: 'center',
+                marginBottom: 12,
               }}
             >
               <Text
                 style={{
-                  color:
-                    statusColor[status],
-                  textAlign: 'center',
+                  color: '#FFFFFF',
                   fontWeight: '900',
-                  fontSize: 11,
                 }}
               >
-                {status}
+                {saving ? 'Saving...' : 'Save Changes'}
               </Text>
             </TouchableOpacity>
-          ))}
-        </View>
+
+            <View
+              style={{
+                flexDirection: 'row',
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
+              {['AVAILABLE', 'MAINTENANCE', 'UNAVAILABLE'].map((status) => (
+                <TouchableOpacity
+                  key={status}
+                  onPress={() => changeStatus(status)}
+                  style={{
+                    flex: 1,
+                    backgroundColor:
+                      status === 'AVAILABLE' ? '#DCFCE7' : '#FFFFFF',
+                    borderRadius: 12,
+                    padding: 12,
+                    borderColor: '#ECECEC',
+                    borderWidth: 1,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: statusColor[status],
+                      textAlign: 'center',
+                      fontWeight: '900',
+                      fontSize: 11,
+                    }}
+                  >
+                    {status}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
 
         <Text
           style={{
@@ -441,34 +580,180 @@ export default function MyBikesScreen({
                 #{booking.id} - {booking.status}
               </Text>
               <Text>
-                User: {booking.userMobile}
+                User mobile: {booking.userMobile || 'Unavailable'}
               </Text>
               <Text>
-                Amount: Rs {booking.grossAmount}
+                Amount paid: Rs {Number(booking.grossAmount || 0).toFixed(2)}
               </Text>
+              {booking.status === 'ACTIVE' && (
+                  <View
+                    style={{
+                      backgroundColor: '#F0FDF4',
+                      borderRadius: 12,
+                      marginTop: 10,
+                      padding: 12,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#166534',
+                        fontWeight: '900',
+                      }}
+                    >
+                      Rider live location
+                    </Text>
+                    {booking.locationSharingEnabled !== true ? (
+                      <Text
+                        style={{
+                          color: '#777777',
+                          marginTop: 6,
+                        }}
+                      >
+                        Location sharing is optional and has not been enabled for this trip.
+                      </Text>
+                    ) : bookingLocations[booking.id]?.sharingEnabled ? (
+                      <>
+                        <Text
+                          style={{
+                            color: '#555555',
+                            marginTop: 6,
+                          }}
+                        >
+                          {bookingLocations[booking.id].paused
+                            ? 'Location is not shared while the rider app is in the background.'
+                            : bookingLocations[booking.id].location &&
+                                Date.now() -
+                                  new Date(
+                                    bookingLocations[booking.id].location.updatedAt
+                                  ).getTime() <
+                                  45000
+                              ? 'Live location; refreshing while the rider app is open.'
+                              : 'No recent location update; the rider app may be closed or location unavailable.'}
+                        </Text>
+                        {bookingLocations[booking.id].location ? (
+                          <>
+                            <Text
+                              style={{
+                                color: '#555555',
+                                marginTop: 6,
+                              }}
+                            >
+                              {bookingLocations[booking.id].location.latitude.toFixed(5)},
+                              {' '}
+                              {bookingLocations[booking.id].location.longitude.toFixed(5)}
+                            </Text>
+                            <Text
+                              style={{
+                                color: '#777777',
+                                marginTop: 4,
+                              }}
+                            >
+                              Last update:{' '}
+                              {new Date(
+                                bookingLocations[booking.id].location.updatedAt
+                              ).toLocaleString()}
+                              {bookingLocations[booking.id].location.accuracy !== null
+                                ? ` (±${Math.round(
+                                    bookingLocations[booking.id].location.accuracy
+                                  )} m)`
+                                : ''}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() =>
+                                openLocationOnMap(
+                                  bookingLocations[booking.id].location
+                                )
+                              }
+                              style={{
+                                alignSelf: 'flex-start',
+                                backgroundColor: '#DCFCE7',
+                                borderRadius: 10,
+                                marginTop: 10,
+                                paddingHorizontal: 12,
+                                paddingVertical: 9,
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: '#166534',
+                                  fontWeight: '900',
+                                }}
+                              >
+                                Open in Maps
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          <Text
+                            style={{
+                              color: '#777777',
+                              marginTop: 6,
+                            }}
+                          >
+                            {bookingLocations[booking.id].paused
+                              ? 'Location will resume when the rider returns to the app.'
+                              : bookingLocations[booking.id].locationStale
+                                ? 'The last location is hidden because it is no longer recent.'
+                                : 'Waiting for the rider’s first location update.'}
+                          </Text>
+                        )}
+                      </>
+                    ) : bookingLocations[booking.id] ? (
+                      <Text
+                        style={{
+                          color: '#777777',
+                          marginTop: 6,
+                        }}
+                      >
+                        The rider has stopped sharing their location.
+                      </Text>
+                    ) : (
+                      <Text
+                        style={{
+                          color: '#777777',
+                          marginTop: 6,
+                        }}
+                      >
+                        Connecting to the rider’s app…
+                      </Text>
+                    )}
+                    {locationError ? (
+                      <Text
+                        style={{
+                          color: '#B91C1C',
+                          marginTop: 6,
+                        }}
+                      >
+                        {locationError}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
             </View>
           ))
         )}
 
-        <TouchableOpacity
-          onPress={deleteBike}
-          style={{
-            backgroundColor: '#FEE2E2',
-            padding: 16,
-            borderRadius: 16,
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-        >
-          <Text
+        {!selectedBikeIsReadOnly && (
+          <TouchableOpacity
+            onPress={deleteBike}
             style={{
-              color: '#DC2626',
-              fontWeight: '900',
+              backgroundColor: '#FEE2E2',
+              padding: 16,
+              borderRadius: 16,
+              alignItems: 'center',
+              marginBottom: 12,
             }}
           >
-            Delete Bike
-          </Text>
-        </TouchableOpacity>
+            <Text
+              style={{
+                color: '#DC2626',
+                fontWeight: '900',
+              }}
+            >
+              Delete Bike
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           onPress={() =>
@@ -512,11 +797,15 @@ export default function MyBikesScreen({
           marginBottom: 20,
         }}
       >
-        My Bikes
+        {bookedOnly ? 'Booked Bikes' : 'My Bikes'}
       </Text>
 
       <FlatList
-        data={bikes}
+        data={
+          bookedOnly
+            ? bikes.filter((bike) => bike.status === 'BOOKED')
+            : bikes
+        }
         contentContainerStyle={{
           paddingBottom: 86,
         }}
@@ -544,7 +833,9 @@ export default function MyBikesScreen({
                 marginTop: 10,
               }}
             >
-              No bikes registered yet.
+              {bookedOnly
+                ? 'There are no currently booked bikes.'
+                : 'No bikes registered yet.'}
             </Text>
           </View>
         }
@@ -615,11 +906,13 @@ export default function MyBikesScreen({
                 >
                   {item.bikeName}
                 </Text>
-                <Feather
-                  name="edit-2"
-                  size={16}
-                  color="#777777"
-                />
+                {!bookedOnly && item.status !== 'BOOKED' ? (
+                  <Feather
+                    name="edit-2"
+                    size={16}
+                    color="#777777"
+                  />
+                ) : null}
               </View>
               <Text
                 style={{
