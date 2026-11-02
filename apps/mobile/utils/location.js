@@ -19,23 +19,29 @@ export async function getCurrentLocation(requestPermission = false) {
   const position = await Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.Balanced,
   });
-  const [place] = await Location.reverseGeocodeAsync(position.coords);
-  const city = place?.city || place?.district || place?.subregion;
-
-  if (!city) {
-    return { status: 'address-unavailable' };
+  let place = null;
+  try {
+    [place] = await Location.reverseGeocodeAsync(position.coords);
+  } catch (error) {
+    console.warn(
+      '[LOCATION GEOCODING UNAVAILABLE]',
+      error?.message || 'Could not resolve the current city.'
+    );
   }
 
-  const region = place.region || '';
+  const city = place?.city || place?.district || place?.subregion;
+  const region = place?.region || '';
 
   return {
     status: 'ready',
     location: {
-      city,
-      district: place.district || '',
-      subregion: place.subregion || '',
+      city: city || null,
+      district: place?.district || '',
+      subregion: place?.subregion || '',
       region,
-      displayName: [city, region].filter(Boolean).join(', '),
+      displayName: city
+        ? [city, region].filter(Boolean).join(', ')
+        : 'Current location (city unavailable)',
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
     },

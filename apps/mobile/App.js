@@ -5,6 +5,7 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
 import {
   View,
   Text,
@@ -50,6 +51,7 @@ export default function App() {
   const [screen, setScreen] = useState('LOGIN');
   const [currentUser, setCurrentUser] = useState(null);
   const [latestBooking, setLatestBooking] = useState(null);
+  const [trackingBooking, setTrackingBooking] = useState(null);
   const [selectedBike, setSelectedBike] = useState(null);
   const [location, setLocation] = useState(null);
   const [locationStatus, setLocationStatus] = useState('idle');
@@ -140,6 +142,7 @@ export default function App() {
     setLoading(false);
     setIsLoggedIn(false);
     setCurrentUser(null);
+    setTrackingBooking(null);
     setLocation(null);
     setLocationStatus('idle');
     setLocationError('');
@@ -149,6 +152,20 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    if (trackingBooking?.locationSharingEnabled === true) {
+      try {
+        await api.post(
+          `/bookings/${trackingBooking.id}/location/stop`
+        );
+      } catch (error) {
+        console.error('[LOCATION STOP ON LOGOUT ERROR]', error.message);
+        Alert.alert(
+          'Location sharing could not be stopped',
+          'Your session will be signed out, but the server could not confirm that location sharing stopped.'
+        );
+      }
+    }
+
     await AsyncStorage.removeItem('user');
     resetLoginState();
     setScreen('LOGIN');
@@ -245,6 +262,143 @@ export default function App() {
       subscription.remove();
     };
   }, [currentUser?.role, isLoggedIn, refreshLocation]);
+
+  useEffect(() => {
+    if (!isLoggedIn || currentUser?.role !== 'USER') {
+      setTrackingBooking(null);
+      return undefined;
+    }
+
+    let active = true;
+    api
+      .get(`/bookings/user/${currentUser.mobile}`)
+      .then((response) => {
+        if (!active) {
+          return;
+        }
+
+        const activeSharedBooking = response.data.find(
+          (booking) =>
+            booking.status === 'ACTIVE' &&
+            booking.locationSharingEnabled === true
+        );
+        setTrackingBooking(activeSharedBooking || null);
+      })
+      .catch((error) => {
+        console.error('[ACTIVE LOCATION BOOKING ERROR]', error);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.mobile, currentUser?.role, isLoggedIn]);
+
+  useEffect(() => {
+    if (
+      !isLoggedIn ||
+      currentUser?.role !== 'USER' ||
+      trackingBooking?.status !== 'ACTIVE' ||
+      trackingBooking.locationSharingEnabled !== true
+    ) {
+      return undefined;
+    }
+
+    let active = true;
+    let locationSubscription = null;
+    let starting = false;
+    const stopWatching = () => {
+      locationSubscription?.remove();
+      locationSubscription = null;
+    };
+    const pauseOnServer = async () => {
+      try {
+        await api.post(
+          `/bookings/${trackingBooking.id}/location/pause`
+        );
+      } catch (error) {
+        console.error('[LOCATION PAUSE ERROR]', error.message);
+      }
+    };
+    const startWatching = async () => {
+      if (starting || locationSubscription) {
+        return;
+      }
+
+      starting = true;
+      stopWatching();
+
+      try {
+        const permission =
+          await Location.getForegroundPermissionsAsync();
+        const servicesEnabled =
+          await Location.hasServicesEnabledAsync();
+        if (!permission.granted || !servicesEnabled) {
+          await pauseOnServer();
+          return;
+        }
+
+        const subscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            timeInterval: 10000,
+            distanceInterval: 15,
+          },
+          (position) => {
+            api
+              .post(`/bookings/${trackingBooking.id}/location`, {
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracy: position.coords.accuracy,
+              })
+              .catch((error) => {
+                console.error('[LOCATION UPDATE ERROR]', error.message);
+              });
+          },
+          (error) => {
+            console.error('[LOCATION WATCH ERROR]', error);
+            pauseOnServer();
+          }
+        );
+        if (active && AppState.currentState === 'active') {
+          locationSubscription = subscription;
+        } else {
+          subscription.remove();
+        }
+      } catch (error) {
+        console.error('[LOCATION WATCH ERROR]', error);
+        await pauseOnServer();
+      } finally {
+        starting = false;
+      }
+    };
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      (state) => {
+        if (state === 'active') {
+          startWatching();
+        } else {
+          stopWatching();
+          pauseOnServer();
+        }
+      }
+    );
+
+    if (AppState.currentState === 'active') {
+      startWatching();
+    }
+
+    return () => {
+      active = false;
+      stopWatching();
+      appStateSubscription.remove();
+    };
+  }, [
+    currentUser?.role,
+    isLoggedIn,
+    trackingBooking?.id,
+    trackingBooking?.locationSharingEnabled,
+    trackingBooking?.status,
+  ]);
 
   const loginWithPassword = async () => {
     if (!indianMobileRegex.test(mobile.trim())) {
@@ -386,6 +540,7 @@ if (screen === 'USER_BOOKINGS') {
   return (
     <UserBookingsScreen
       userMobile={currentUser?.mobile}
+      onTrackingBookingChange={setTrackingBooking}
       onBack={() =>
         setScreen('USER')
       }
@@ -404,6 +559,16 @@ if (screen === 'MY_BIKES') {
   );
 }
 
+if (screen === 'BOOKED_BIKES') {
+  return (
+    <MyBikesScreen
+      adminMobile={currentUser?.mobile}
+      bookedOnly
+      onBack={() => setScreen('ADMIN')}
+    />
+  );
+}
+
   if (screen === 'ADMIN') {
   return (
  <AdminDashboard
@@ -417,6 +582,9 @@ if (screen === 'MY_BIKES') {
     setScreen(
       'MY_BIKES'
     )
+  }
+  onBookedBikes={() =>
+    setScreen('BOOKED_BIKES')
   }
   onEarnings={() =>
     setScreen(

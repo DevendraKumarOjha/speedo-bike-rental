@@ -16,6 +16,7 @@ export default function AdminDashboard({
   adminMobile,
   onAddBike,
   onMyBikes,
+  onBookedBikes,
   onEarnings,
   onLogout,
 }) {
@@ -24,6 +25,9 @@ export default function AdminDashboard({
     useState(0);
 
   const [activeBikes, setActiveBikes] =
+    useState(0);
+
+  const [bookedBikeCount, setBookedBikeCount] =
     useState(0);
 
   const [earnings, setEarnings] =
@@ -46,6 +50,11 @@ export default function AdminDashboard({
           bikesResponse.data.filter(
             bike =>
               bike.status === 'AVAILABLE'
+          ).length
+        );
+        setBookedBikeCount(
+          bikesResponse.data.filter(
+            (bike) => bike.status === 'BOOKED'
           ).length
         );
         setEarnings(earningsResponse.data);
@@ -249,6 +258,26 @@ export default function AdminDashboard({
           }}
         >
           My Bikes
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={onBookedBikes}
+        style={{
+          backgroundColor: '#111111',
+          padding: 18,
+          borderRadius: 16,
+          marginBottom: 12,
+        }}
+      >
+        <Text
+          style={{
+            textAlign: 'center',
+            fontWeight: '900',
+            color: '#FFFFFF',
+          }}
+        >
+          Booked Bikes ({bookedBikeCount})
         </Text>
       </TouchableOpacity>
 

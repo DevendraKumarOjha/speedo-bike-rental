@@ -41,3 +41,7 @@ This is a closed-test app: payments are mocked and OTP verification is disabled.
 Rider accounts must grant foreground location permission and enable Location Services to continue. The app checks location again when returning from phone settings and shows a blocking prompt if access or device location is turned off. Admin accounts can continue managing bikes without rider location access.
 
 The home screen displays the device's reverse-geocoded city and state. The available-bike list only includes bikes marked `AVAILABLE` whose registered city matches the rider's current city; the bike records currently contain city names rather than pickup coordinates, so the app does not calculate a distance radius. Rebuild and reinstall the APK after changing location permissions or code.
+
+## Optional live location during a trip
+
+When a rider starts a trip, they can choose to share or not share their live location. Sharing is limited to the admin who owns the booked bike, only while that trip is active and the rider app is in the foreground. Riders can stop sharing at any time; sharing is also stopped when they sign out or end the trip. The app does not request background-location permission or store a route history. While the admin views that bike's bookings, the latest location refreshes about every 10 seconds and opens in Maps; stale locations are hidden after 45 seconds. Live coordinates are held in backend memory and are cleared when sharing pauses/stops or the trip ends.

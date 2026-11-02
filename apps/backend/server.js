@@ -103,6 +103,7 @@ let payments;
 let users;
 let wallets;
 let settlementHistory;
+const liveBookingLocations = new Map();
 const BCRYPT_MAX_PASSWORD_BYTES = 72;
 const REGISTRATION_ROLES = ['USER', 'ADMIN'];
 
@@ -761,6 +762,18 @@ app.put('/api/admin/bikes/:id', asyncHandler(async (req, res) => {
     });
   }
 
+  const hasActiveBooking = bookings.some(
+    (booking) =>
+      booking.bikeId === bikeId &&
+      ['UPCOMING', 'ACTIVE'].includes(booking.status)
+  );
+
+  if (hasActiveBooking) {
+    return res.status(409).json({
+      message: 'Cannot edit a bike while it has an upcoming or active booking',
+    });
+  }
+
   const editableFields = [
     'bikeName',
     'bikeNumber',
@@ -942,11 +955,92 @@ app.get('/api/admin/bikes/:id/bookings', (req, res) => {
       );
 
   res.json(
-    bikeBookings.map(
-      ({ superAdminCommission, userMobile, grossAmount, ...booking }) => booking
-    )
+    bikeBookings.map((booking) => {
+      const payment = payments.find(
+        (item) =>
+          Number(item.id) === Number(booking.paymentId) &&
+          Number(item.bikeId) === bikeId
+      );
+      const {
+        adminMobile,
+        superAdminCommission,
+        adminAmount,
+        ...adminBooking
+      } = booking;
+
+      return {
+        ...adminBooking,
+        userMobile: booking.userMobile || payment?.userMobile || null,
+        grossAmount: Number(
+          booking.grossAmount ??
+            payment?.amount ??
+            booking.pricePerHour ??
+            0
+        ),
+      };
+    })
   );
 });
+
+app.get(
+  '/api/admin/bikes/:bikeId/bookings/:bookingId/location',
+  (req, res) => {
+    const bikeId = Number(req.params.bikeId);
+    const bookingId = Number(req.params.bookingId);
+    const bike = bikes.find((item) => item.id === bikeId);
+
+    if (!bike) {
+      return res.status(404).json({ message: 'Bike not found' });
+    }
+
+    if (bike.adminMobile !== req.user.mobile) {
+      return res.status(403).json({
+        message: 'You can only view locations for your own bikes',
+      });
+    }
+
+    const booking = bookings.find(
+      (item) => item.id === bookingId && item.bikeId === bikeId
+    );
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    if (booking.status !== 'ACTIVE') {
+      return res.json({
+        sharingEnabled: false,
+        paused: false,
+        location: null,
+      });
+    }
+
+    const lastLocation = liveBookingLocations.get(booking.id) || null;
+    const lastUpdateAge = lastLocation
+      ? Date.now() - new Date(lastLocation.updatedAt).getTime()
+      : null;
+    const locationIsFresh =
+      lastUpdateAge !== null &&
+      lastUpdateAge >= 0 &&
+      lastUpdateAge <= 45000;
+    if (lastLocation && !locationIsFresh) {
+      liveBookingLocations.delete(booking.id);
+    }
+
+    res.json({
+      sharingEnabled: booking.locationSharingEnabled === true,
+      paused: Boolean(booking.locationSharingPausedAt),
+      consentedAt: booking.locationSharingConsentAt || null,
+      locationStale: Boolean(lastLocation && !locationIsFresh),
+      location:
+        booking.locationSharingEnabled &&
+        !booking.locationSharingPausedAt &&
+        locationIsFresh
+          ? lastLocation
+          : null,
+    });
+  }
+);
 
 app.get(
   '/api/admin/earnings/:mobile',
@@ -1338,6 +1432,9 @@ app.post('/api/bookings', asyncHandler(async (req, res) => {
     tripStartTime: null,
     tripEndTime: null,
     cancelledAt: null,
+    locationSharingEnabled: false,
+    locationSharingConsentAt: null,
+    locationSharingPausedAt: null,
     refundStatus: 'NOT_APPLICABLE',
     settlementStatus: 'PENDING',
     settledAt: null,
@@ -1423,6 +1520,12 @@ app.post('/api/bookings/:id/start', asyncHandler(async (req, res) => {
 
   booking.status = 'ACTIVE';
   booking.tripStartTime = new Date();
+  booking.locationSharingEnabled =
+    req.body.shareLocation === true;
+  booking.locationSharingConsentAt =
+    booking.locationSharingEnabled ? new Date() : null;
+  booking.locationSharingPausedAt = null;
+  liveBookingLocations.delete(booking.id);
 
   await saveData();
 
@@ -1431,6 +1534,134 @@ app.post('/api/bookings/:id/start', asyncHandler(async (req, res) => {
     booking: getUserBookingData(booking),
   });
 }));
+
+app.post(
+  '/api/bookings/:id/location',
+  asyncHandler(async (req, res) => {
+    const bookingId = Number(req.params.id);
+    const booking = bookings.find((item) => item.id === bookingId);
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    if (booking.userMobile !== req.user.mobile) {
+      return res.status(403).json({
+        message: 'You can only share location for your own booking',
+      });
+    }
+
+    if (
+      booking.status !== 'ACTIVE' ||
+      booking.locationSharingEnabled !== true
+    ) {
+      return res.status(403).json({
+        message: 'Location sharing is not enabled for this active booking',
+      });
+    }
+
+    const latitude =
+      typeof req.body.latitude === 'number'
+        ? req.body.latitude
+        : NaN;
+    const longitude =
+      typeof req.body.longitude === 'number'
+        ? req.body.longitude
+        : NaN;
+    const accuracy =
+      req.body.accuracy == null
+        ? null
+        : Number(req.body.accuracy);
+
+    if (
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180 ||
+      (accuracy !== null &&
+        (!Number.isFinite(accuracy) || accuracy < 0))
+    ) {
+      return res.status(400).json({
+        message: 'A valid latitude, longitude and accuracy are required',
+      });
+    }
+
+    const previousLocation = liveBookingLocations.get(booking.id);
+    const previousUpdateTime = previousLocation?.updatedAt
+      ? new Date(previousLocation.updatedAt).getTime()
+      : null;
+    if (
+      previousUpdateTime !== null &&
+      Date.now() - previousUpdateTime < 5000
+    ) {
+      return res.json({ message: 'Location update received recently' });
+    }
+
+    liveBookingLocations.set(booking.id, {
+      latitude,
+      longitude,
+      accuracy,
+      updatedAt: new Date(),
+    });
+    booking.locationSharingPausedAt = null;
+
+    res.json({ message: 'Location updated' });
+  })
+);
+
+app.post(
+  '/api/bookings/:id/location/pause',
+  asyncHandler(async (req, res) => {
+    const bookingId = Number(req.params.id);
+    const booking = bookings.find((item) => item.id === bookingId);
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    if (booking.userMobile !== req.user.mobile) {
+      return res.status(403).json({
+        message: 'You can only pause location sharing for your own booking',
+      });
+    }
+
+    if (booking.locationSharingEnabled === true) {
+      booking.locationSharingPausedAt = new Date();
+      liveBookingLocations.delete(booking.id);
+      await saveData();
+    }
+
+    res.json({ message: 'Location sharing paused' });
+  })
+);
+
+app.post(
+  '/api/bookings/:id/location/stop',
+  asyncHandler(async (req, res) => {
+    const bookingId = Number(req.params.id);
+    const booking = bookings.find((item) => item.id === bookingId);
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    if (booking.userMobile !== req.user.mobile) {
+      return res.status(403).json({
+        message: 'You can only stop location sharing for your own booking',
+      });
+    }
+
+    booking.locationSharingEnabled = false;
+    booking.locationSharingPausedAt = null;
+    liveBookingLocations.delete(booking.id);
+    booking.locationSharingStoppedAt = new Date();
+    await saveData();
+
+    res.json({ message: 'Location sharing stopped' });
+  })
+);
 
 app.post('/api/bookings/:id/cancel', asyncHandler(async (req, res) => {
   const bookingId =
@@ -1478,6 +1709,9 @@ app.post('/api/bookings/:id/cancel', asyncHandler(async (req, res) => {
 
   booking.status = 'CANCELLED';
   booking.cancelledAt = new Date();
+  booking.locationSharingEnabled = false;
+  booking.locationSharingPausedAt = null;
+  liveBookingLocations.delete(booking.id);
   booking.refundStatus = 'REFUNDED';
 
   if (bike) {
@@ -1537,6 +1771,9 @@ app.post('/api/bookings/:id/complete', asyncHandler(async (req, res) => {
   booking.tripEndTime = new Date();
   booking.completedAt =
     booking.tripEndTime;
+  booking.locationSharingEnabled = false;
+  booking.locationSharingPausedAt = null;
+  liveBookingLocations.delete(booking.id);
 
   const startTime =
     new Date(

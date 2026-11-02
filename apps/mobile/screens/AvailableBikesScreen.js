@@ -450,7 +450,9 @@ export default function AvailableBikesScreen({
                   marginTop: 6,
                 }}
               >
-                There are no available bikes in your current city. Try again later.
+                {location?.city
+                  ? 'There are no available bikes in your current city. Try again later.'
+                  : 'Your GPS location is available, but your city could not be identified. Reconnect and reopen the app to retry. Bikes are hidden until the city can be verified.'}
               </Text>
             </View>
           }
