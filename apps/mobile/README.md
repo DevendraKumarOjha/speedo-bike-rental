@@ -35,3 +35,9 @@ Expo Go uses the current computer running Expo as the local API host by default,
 If you see an Imunify360 bot-protection response, the request reached the hosting firewall rather than the app's login handler. Use the local backend for development. For production, ask your hosting provider to allow legitimate mobile API requests; changing the app cannot override the server firewall.
 
 This is a closed-test app: payments are mocked and OTP verification is disabled. Do not use it to collect real payments or expose demo credentials publicly.
+
+## Rider location and available bikes
+
+Rider accounts must grant foreground location permission and enable Location Services to continue. The app checks location again when returning from phone settings and shows a blocking prompt if access or device location is turned off. Admin accounts can continue managing bikes without rider location access.
+
+The home screen displays the device's reverse-geocoded city and state. The available-bike list only includes bikes marked `AVAILABLE` whose registered city matches the rider's current city; the bike records currently contain city names rather than pickup coordinates, so the app does not calculate a distance radius. Rebuild and reinstall the APK after changing location permissions or code.

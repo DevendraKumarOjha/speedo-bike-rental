@@ -23,6 +23,7 @@ import {
 
 import api from '../services/api';
 import getFriendlyErrorMessage from '../utils/getFriendlyErrorMessage';
+import { bikeIsInLocation } from '../utils/location';
 
 const categories = [
   'All',
@@ -32,13 +33,13 @@ const categories = [
 ];
 
 const sorts = [
-  'Nearby',
   'Top Rated',
   'Low Price',
 ];
 
 export default function AvailableBikesScreen({
   userMobile,
+  location,
   onBack,
   onBookBike,
 }) {
@@ -47,8 +48,6 @@ export default function AvailableBikesScreen({
     useState([]);
   const [loading, setLoading] =
     useState(true);
-  const [selectedCity, setSelectedCity] =
-    useState('All Cities');
   const [search, setSearch] =
     useState('');
   const [category, setCategory] =
@@ -56,7 +55,7 @@ export default function AvailableBikesScreen({
   const [maxPrice, setMaxPrice] =
     useState('');
   const [sort, setSort] =
-    useState('Nearby');
+    useState('Top Rated');
   const [loadError, setLoadError] =
     useState('');
 
@@ -85,23 +84,6 @@ export default function AvailableBikesScreen({
     loadBikes();
   }, []);
 
-  const cities =
-    useMemo(() => {
-      const uniqueCities =
-        Array.from(
-          new Set(
-            bikes
-              .map((bike) => bike.city)
-              .filter(Boolean)
-          )
-        );
-
-      return [
-        'All Cities',
-        ...uniqueCities,
-      ];
-    }, [bikes]);
-
   const filteredBikes =
     useMemo(() => {
       const searchText =
@@ -109,17 +91,10 @@ export default function AvailableBikesScreen({
 
       let result =
         bikes.filter(
-          bike =>
-            bike.status === 'AVAILABLE'
+          (bike) =>
+            bike.status === 'AVAILABLE' &&
+            bikeIsInLocation(bike, location)
         );
-
-      if (selectedCity !== 'All Cities') {
-        result =
-          result.filter(
-            bike =>
-              bike.city === selectedCity
-          );
-      }
 
       if (category !== 'All') {
         result =
@@ -158,11 +133,11 @@ export default function AvailableBikesScreen({
           return (b.rating || 0) - (a.rating || 0);
         }
 
-        return (a.distanceKm || 99) - (b.distanceKm || 99);
+        return (b.rating || 0) - (a.rating || 0);
       });
     }, [
       bikes,
-      selectedCity,
+      location,
       search,
       category,
       maxPrice,
@@ -216,61 +191,9 @@ export default function AvailableBikesScreen({
             fontWeight: '900',
           }}
         >
-          Select City
+          Available bikes in {location?.displayName || 'your city'}
         </Text>
       </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{
-          maxHeight: 52,
-          marginBottom: 12,
-        }}
-        contentContainerStyle={{
-          alignItems: 'center',
-          paddingVertical: 2,
-        }}
-      >
-        {cities.map((city) => (
-          <TouchableOpacity
-            key={city}
-            onPress={() =>
-              setSelectedCity(city)
-            }
-            style={{
-              backgroundColor:
-                selectedCity === city
-                  ? '#111111'
-                  : '#FFFFFF',
-              paddingVertical: 10,
-              paddingHorizontal: 18,
-              borderRadius: 14,
-              marginRight: 8,
-              borderColor: '#ECECEC',
-              borderWidth: 1,
-              minHeight: 44,
-              justifyContent: 'center',
-              minWidth: city === 'All Cities' ? 118 : 92,
-            }}
-          >
-            <Text
-              style={{
-                color:
-                  selectedCity === city
-                    ? '#FFFFFF'
-                    : '#111111',
-                fontWeight: '800',
-                fontSize: 14,
-                lineHeight: 18,
-              }}
-              numberOfLines={1}
-            >
-              {city}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
 
       <View
         style={{
@@ -291,7 +214,7 @@ export default function AvailableBikesScreen({
           color="#777777"
         />
         <TextInput
-          placeholder="Search bikes, hotels, cities"
+          placeholder="Search bikes and hotels"
           placeholderTextColor="#999999"
           value={search}
           onChangeText={setSearch}
@@ -527,7 +450,7 @@ export default function AvailableBikesScreen({
                   marginTop: 6,
                 }}
               >
-                Try another city, category or price. If you are an admin, register a bike first.
+                There are no available bikes in your current city. Try again later.
               </Text>
             </View>
           }
@@ -650,7 +573,6 @@ export default function AvailableBikesScreen({
                 {[
                   'Available',
                   `${item.rating || 4.5} rating`,
-                  `${item.distanceKm || 1.2} km`,
                 ].map((label) => (
                   <Text
                     key={label}
