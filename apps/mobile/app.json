@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "bikerental",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -18,9 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": true
+      "package": "com.speedoryde.bikerental"
     },
     "web": {
       "output": "single",
@@ -46,6 +44,12 @@
     ],
     "experiments": {
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f8da6a0a-8542-4d1e-90df-8c3e696ef304"
+      }
+    },
+    "owner": "lokendraojha"
   }
 }

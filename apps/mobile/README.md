@@ -1,50 +1,37 @@
-# Welcome to your Expo app 👋
+# Bike Rental Mobile App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The Expo app is configured to call `https://api.speedoryde.com/api` and the EAS `preview` profile produces an Android APK for closed testing.
 
-## Get started
+## Build an APK
 
-1. Install dependencies
+Build only after the backend health endpoint at `https://api.speedoryde.com/api/test` returns JSON successfully.
 
-   ```bash
-   npm install
-   ```
+From this directory:
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```powershell
+npx expo config --type public
+npx eas login
+npx eas whoami
+npx eas build --platform android --profile preview
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+The signed-in Expo account must have access to the project configured in `app.json`. EAS provides an APK download link when the build completes.
 
-## Learn more
+To override the API URL for a build, set `EXPO_PUBLIC_API_URL` in the build environment. Do not use `localhost` in an APK shared with testers.
 
-To learn more about developing your project with Expo, look at the following resources:
+## Run locally with Expo Go
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+This project uses Expo SDK 58, so update Expo Go from the Play Store before testing.
 
-## Join the community
+From this directory, copy the local environment template:
 
-Join our community of developers creating universal apps.
+```powershell
+Copy-Item .env.development.local.example .env.development.local
+npx expo start --clear
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Expo Go uses the current computer running Expo as the local API host by default, using the Metro connection address; you should not need to edit an IP when it changes. `localhost` cannot be used from Expo Go on a physical phone because it refers to the phone itself. Keep the phone and computer on the same Wi-Fi network. The local backend must be running and reachable on port `3002`; allow it through Windows Firewall if needed. For an Android emulator, use `http://10.0.2.2:3002/api` as a manual override instead. This ignored local file overrides the production URL; EAS profiles remain configured to use the hosted API.
+
+If you see an Imunify360 bot-protection response, the request reached the hosting firewall rather than the app's login handler. Use the local backend for development. For production, ask your hosting provider to allow legitimate mobile API requests; changing the app cannot override the server firewall.
+
+This is a closed-test app: payments are mocked and OTP verification is disabled. Do not use it to collect real payments or expose demo credentials publicly.

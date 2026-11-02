@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
+  Alert,
 } from 'react-native';
 import {
   Feather,
@@ -16,6 +17,7 @@ import {
 } from '@expo/vector-icons';
 
 import api from '../services/api';
+import getFriendlyErrorMessage from '../utils/getFriendlyErrorMessage';
 
 export default function UserDashboard({
   onBrowseBikes,
@@ -44,9 +46,25 @@ export default function UserDashboard({
         setAvailableCount(available.length);
         setTopBike(available[0] || null);
       } catch (error) {
-        console.log(
-          'USER HOME ERROR',
-          error?.response?.data || error
+        if (__DEV__) {
+          console.error('[BIKES API ERROR]', {
+            code: error?.code,
+            message: error?.message,
+            method: error?.config?.method,
+            url: error?.config ? api.getUri(error.config) : null,
+            status: error?.response?.status,
+            requestStatus: error?.request?.status,
+            requestUrl: error?.request?.responseURL,
+            readyState: error?.request?.readyState,
+          });
+        }
+
+        Alert.alert(
+          'Unable to load bikes',
+          getFriendlyErrorMessage(
+            error,
+            'Please try again in a moment.'
+          )
         );
       }
     };
