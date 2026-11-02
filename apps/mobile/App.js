@@ -1,5 +1,7 @@
 import React, {
+  useCallback,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,6 +12,8 @@ import {
   TouchableOpacity,
   StatusBar,
   Alert,
+  AppState,
+  Linking,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -23,6 +27,7 @@ import AdminEarningsScreen from './screens/AdminEarningsScreen';
 import BookingConfirmedScreen from './screens/BookingConfirmedScreen';
 import UserBookingsScreen from './screens/UserBookingsScreen';
 import MockPaymentScreen from './screens/MockPaymentScreen';
+import LocationRequiredScreen from './screens/LocationRequiredScreen';
 
 import {
   SafeAreaView,
@@ -30,6 +35,7 @@ import {
 
 import api from './services/api';
 import getFriendlyErrorMessage from './utils/getFriendlyErrorMessage';
+import { getCurrentLocation } from './utils/location';
 
 export default function App() {
   //Screen State
@@ -45,13 +51,41 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [latestBooking, setLatestBooking] = useState(null);
   const [selectedBike, setSelectedBike] = useState(null);
+  const [location, setLocation] = useState(null);
+  const [locationStatus, setLocationStatus] = useState('idle');
+  const [locationCanAskAgain, setLocationCanAskAgain] = useState(true);
+  const [locationError, setLocationError] = useState('');
   const indianMobileRegex = /^[6-9]\d{9}$/;
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const locationRef = useRef(location);
+  locationRef.current = location;
+
+  const refreshLocation = useCallback(async (requestPermission = false) => {
+    setLocationStatus('loading');
+    setLocationError('');
+
+    try {
+      const result = await getCurrentLocation(requestPermission);
+      setLocationStatus(result.status);
+      setLocationCanAskAgain(result.canAskAgain ?? false);
+      setLocation(result.location || null);
+      return result;
+    } catch (error) {
+      console.error('[LOCATION ERROR]', error);
+      setLocationStatus('error');
+      setLocationCanAskAgain(false);
+      setLocation(null);
+      setLocationError(error.message);
+      return { status: 'error' };
+    }
+  }, []);
 
   const routeUser = (user) => {
     if (user.role === 'ADMIN') {
       setScreen('ADMIN');
     } else {
-      setScreen('USER');
+      setScreen('LOCATION_REQUIRED');
     }
   };
 
@@ -83,6 +117,12 @@ export default function App() {
         setCurrentUser(user);
         setIsLoggedIn(true);
         routeUser(user);
+        if (user.role === 'USER') {
+          const result = await refreshLocation(true);
+          if (result.status === 'ready') {
+            setScreen('USER');
+          }
+        }
       } catch {
         await AsyncStorage.removeItem('user');
         delete api.defaults.headers.common.Authorization;
@@ -100,6 +140,9 @@ export default function App() {
     setLoading(false);
     setIsLoggedIn(false);
     setCurrentUser(null);
+    setLocation(null);
+    setLocationStatus('idle');
+    setLocationError('');
     delete api.defaults.headers.common.Authorization;
     setLatestBooking(null);
     setSelectedBike(null);
@@ -128,11 +171,80 @@ export default function App() {
       JSON.stringify({ user, token })
     );
     setIsLoggedIn(true);
+    if (user.role === 'USER') {
+      const result = await refreshLocation(true);
+      if (result.status === 'ready') {
+        setScreen('USER');
+      }
+    }
     setPassword('');
     setRegistrationPassword('');
     setRegistrationPasswordConfirmation('');
     Alert.alert('Success', `Welcome ${user.mobile}`);
   };
+
+  const openLocationSettings = async () => {
+    try {
+      if (
+        Platform.OS === 'android' &&
+        locationStatus === 'services-disabled'
+      ) {
+        await Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS');
+      } else {
+        await Linking.openSettings();
+      }
+    } catch (error) {
+      Alert.alert(
+        'Unable to open settings',
+        error.message || 'Open your phone settings and enable Location Services.'
+      );
+    }
+  };
+
+  const retryLocation = async (requestPermission = false) => {
+    const result = await refreshLocation(requestPermission);
+    if (result.status === 'ready') {
+      setScreen('USER');
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoggedIn || currentUser?.role !== 'USER') {
+      return undefined;
+    }
+
+    let active = true;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        return;
+      }
+
+      const previousScreen = screenRef.current;
+      const previousCity = locationRef.current?.city;
+      setScreen('LOCATION_REQUIRED');
+      refreshLocation().then((result) => {
+        if (active && result.status === 'ready') {
+          const cityChanged =
+            previousCity &&
+            previousCity.trim().toLowerCase() !==
+              result.location.city.trim().toLowerCase();
+          if (cityChanged) {
+            setSelectedBike(null);
+          }
+          setScreen(
+            cityChanged || previousScreen === 'LOCATION_REQUIRED'
+              ? 'USER'
+              : previousScreen
+          );
+        }
+      });
+    });
+
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, [currentUser?.role, isLoggedIn, refreshLocation]);
 
   const loginWithPassword = async () => {
     if (!indianMobileRegex.test(mobile.trim())) {
@@ -214,6 +326,19 @@ export default function App() {
       setLoading(false);
     }
   };
+
+if (screen === 'LOCATION_REQUIRED') {
+  return (
+    <LocationRequiredScreen
+      status={locationStatus}
+      canAskAgain={locationCanAskAgain}
+      errorMessage={locationError}
+      onEnable={() => retryLocation(true)}
+      onOpenSettings={openLocationSettings}
+      onRetry={() => retryLocation(false)}
+    />
+  );
+}
 
 if (screen === 'ADMIN_EARNINGS') {
   return (
@@ -319,6 +444,7 @@ if (screen === 'ADD_BIKE') {
 if (screen === 'USER') {
   return (
     <UserDashboard
+      location={location}
       onBrowseBikes={() =>
         setScreen(
           'AVAILABLE_BIKES'
@@ -340,6 +466,7 @@ if (screen === 'AVAILABLE_BIKES') {
   return (
     <AvailableBikesScreen
       userMobile={currentUser?.mobile}
+      location={location}
       onBack={() =>
         setScreen('USER')
       }
