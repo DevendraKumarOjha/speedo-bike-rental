@@ -39,6 +39,12 @@
       ],
       "expo-font",
       "expo-image",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Bike Rental to use your location to show bikes available in your city."
+        }
+      ],
       "expo-status-bar",
       "expo-web-browser"
     ],

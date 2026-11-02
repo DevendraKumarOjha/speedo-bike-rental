@@ -18,16 +18,15 @@ import {
 
 import api from '../services/api';
 import getFriendlyErrorMessage from '../utils/getFriendlyErrorMessage';
+import { bikeIsInLocation } from '../utils/location';
 
 export default function UserDashboard({
+  location,
   onBrowseBikes,
   onBookings,
   onLogout,
 }) {
-
-  const [availableCount, setAvailableCount] =
-    useState(0);
-
+  const [availableBikes, setAvailableBikes] = useState([]);
   const [topBike, setTopBike] =
     useState(null);
 
@@ -37,13 +36,13 @@ export default function UserDashboard({
         const response =
           await api.get('/bikes');
 
-        const available =
-          response.data.filter(
-            bike =>
-              bike.status === 'AVAILABLE'
-          );
+        const available = response.data.filter(
+          (bike) =>
+            bike.status === 'AVAILABLE' &&
+            bikeIsInLocation(bike, location)
+        );
 
-        setAvailableCount(available.length);
+        setAvailableBikes(available);
         setTopBike(available[0] || null);
       } catch (error) {
         if (__DEV__) {
@@ -70,7 +69,9 @@ export default function UserDashboard({
     };
 
     loadBikes();
-  }, []);
+  }, [location]);
+
+  const availableCount = availableBikes.length;
 
   return (
     <View
@@ -114,7 +115,7 @@ export default function UserDashboard({
               fontWeight: '700',
             }}
           >
-            Jaipur, Rajasthan
+            {location?.displayName || 'Finding your location...'}
           </Text>
           </View>
           <Text
@@ -212,8 +213,18 @@ export default function UserDashboard({
       >
         {[
           ['All Bikes', availableCount],
-          ['Sports', topBike ? 1 : 0],
-          ['Cruiser', 0],
+          [
+            'Sports',
+            availableBikes.filter(
+              (bike) => (bike.category || '').toLowerCase() === 'sports'
+            ).length,
+          ],
+          [
+            'Cruiser',
+            availableBikes.filter(
+              (bike) => (bike.category || '').toLowerCase() === 'cruiser'
+            ).length,
+          ],
         ].map(([label, count]) => (
           <View
             key={label}
